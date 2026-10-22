@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Nuggi</RootNamespace>
+    <AssemblyName>Nuggi</AssemblyName>
+    <Company>TechArchive</Company>
+    <Authors>TechArchive</Authors>
+    <Product>Nuggi</Product>
+    <Title>Nuggi</Title>
+    <Description>Windows Forms background remover with live preview.</Description>
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+  </PropertyGroup>
+</Project>

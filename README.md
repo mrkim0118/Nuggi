@@ -34,6 +34,12 @@ It will:
 
 The first background-removal run may download the segmentation model automatically.
 
+## Portable distribution
+
+Run `publish.bat` to create `publish/Nuggi-win-x64` and its zip archive.
+
+The distribution is framework-dependent to keep its size smaller. The target PC must have the Microsoft .NET 8 Desktop Runtime (x64) installed. Release packages do not include `.pdb` debug-symbol files.
+
 ## Usage
 
 1. Click `이미지 추가` or `폴더 추가`

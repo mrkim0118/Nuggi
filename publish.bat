@@ -15,8 +15,10 @@ if exist "%ZIP_PATH%" (
 )
 
 echo [1/6] Publishing WinForms app...
-dotnet publish Nuggi.csproj -c Release -r win-x64 --self-contained true -o "%PUBLISH_DIR%" -v minimal
+dotnet publish Nuggi.csproj -c Release -r win-x64 --self-contained false -o "%PUBLISH_DIR%" -v minimal -p:DebugType=None -p:DebugSymbols=false
 if errorlevel 1 goto :error
+
+if exist "%PUBLISH_DIR%\*.pdb" del /q "%PUBLISH_DIR%\*.pdb"
 
 echo [2/6] Copying Python virtual environment...
 robocopy ".venv" "%PUBLISH_DIR%\.venv" /E /XD "__pycache__" >nul

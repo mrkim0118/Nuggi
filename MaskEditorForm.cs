@@ -158,7 +158,7 @@ internal sealed class MaskEditorForm : Form
         undoButton.Margin = new Padding(0, 0, 6, 0);
         toolbarLayout.Controls.Add(undoButton);
 
-        var clearButton = Theme.SecondaryButton("모두 지우기", (_, _) => _canvas.ClearMask());
+        var clearButton = Theme.SecondaryButton("영역 전체 삭제", (_, _) => _canvas.ClearMask());
         clearButton.Margin = new Padding(0, 0, 6, 0);
         toolbarLayout.Controls.Add(clearButton);
 

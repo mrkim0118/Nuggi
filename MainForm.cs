@@ -31,14 +31,10 @@ internal sealed class MainForm : Form
     private readonly TextBox _outputDirectoryTextBox = new();
     private readonly ComboBox _modelComboBox = new();
     private readonly CheckBox _trimCheckBox = new();
-    private readonly ComboBox _saveModeComboBox = new();
-
-    // Batch save modes understood by scripts/nuggi_worker.py.
-    private const string SaveModeSingle = "single";
-    private static readonly string[] SaveModes = [SaveModeSingle, "split", "objects"];
     private readonly Button _startButton = new();
     private readonly Button _openOutputButton = new();
     private readonly Button _editMaskButton = new();
+    private readonly Button _saveMaskButton = new();
     private readonly ProgressBar _progressBar = new();
     private readonly Label _statusLabel = new();
     private readonly Label _selectionSummaryLabel = new();
@@ -71,7 +67,6 @@ internal sealed class MainForm : Form
 
         _outputDirectoryTextBox.Text = Path.Combine(_appPaths.RootDirectory, "output");
         _modelComboBox.SelectedIndex = 0;
-        _saveModeComboBox.SelectedIndex = 0;
         _trimCheckBox.Checked = true;
 
         TryDeleteStaleTempFiles();
@@ -245,13 +240,6 @@ internal sealed class MainForm : Form
         _modelComboBox.Items.AddRange(["u2net · 기본 (자동 보정 포함)", "u2netp · 가벼움 (속도 우선)"]);
         AddRow(_modelComboBox);
 
-        AddRow(Theme.FieldLabel("저장 방식"));
-        _saveModeComboBox.Dock = DockStyle.Fill;
-        _saveModeComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
-        // Same order as SaveModes.
-        _saveModeComboBox.Items.AddRange(["한 장으로 저장", "떨어진 덩어리별로 따로 저장", "자동 인식한 사물별로 따로 저장"]);
-        AddRow(_saveModeComboBox);
-
         _trimCheckBox.Text = "피사체에 맞춰 빈 여백 잘라내기";
         _trimCheckBox.AutoSize = true;
         _trimCheckBox.Margin = new Padding(0, 12, 0, 0);
@@ -331,12 +319,17 @@ internal sealed class MainForm : Form
         _previewStatusLabel.Text = "왼쪽 목록에서 이미지를 고르면 원본과 누끼 영역이 표시됩니다.";
         header.Controls.Add(_previewStatusLabel, 0, 1);
 
+        var headerButtons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Anchor = AnchorStyles.Right, Margin = Padding.Empty };
+        Theme.StyleSecondary(_saveMaskButton);
+        _saveMaskButton.Text = "마스크 저장";
+        _saveMaskButton.Margin = new Padding(0, 0, 8, 0);
+        headerButtons.Controls.Add(_saveMaskButton);
         Theme.StylePrimary(_editMaskButton);
         _editMaskButton.Text = "영역 편집";
-        _editMaskButton.Anchor = AnchorStyles.Right;
         _editMaskButton.Margin = Padding.Empty;
-        header.Controls.Add(_editMaskButton, 1, 0);
-        header.SetRowSpan(_editMaskButton, 2);
+        headerButtons.Controls.Add(_editMaskButton);
+        header.Controls.Add(headerButtons, 1, 0);
+        header.SetRowSpan(headerButtons, 2);
         layout.Controls.Add(header, 0, 0);
 
         var previewGrid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
@@ -425,6 +418,7 @@ internal sealed class MainForm : Form
         _startButton.Click += async (_, _) => await StartProcessingAsync();
         _openOutputButton.Click += (_, _) => OpenOutputDirectory();
         _editMaskButton.Click += async (_, _) => await EditCurrentMaskAsync();
+        _saveMaskButton.Click += async (_, _) => await SaveCurrentMaskAsync();
     }
 
     private void SetSplitDistanceSafely(int preferredDistance)
@@ -566,11 +560,11 @@ internal sealed class MainForm : Form
 
         _startButton.Enabled = !_isProcessing && hasFiles;
         _editMaskButton.Enabled = !_isProcessing && hasSelection;
+        _saveMaskButton.Enabled = !_isProcessing && hasSelection;
         _openOutputButton.Enabled = !_isProcessing;
         _fileListBox.Enabled = !_isProcessing;
         _modelComboBox.Enabled = !_isProcessing;
         _trimCheckBox.Enabled = !_isProcessing;
-        _saveModeComboBox.Enabled = !_isProcessing;
         _outputDirectoryTextBox.Enabled = !_isProcessing;
     }
 
@@ -803,7 +797,6 @@ internal sealed class MainForm : Form
         UpdateUiState();
 
         var modelName = SelectedModelName;
-        var saveMode = SaveModes[Math.Max(0, _saveModeComboBox.SelectedIndex)];
         var successCount = 0;
         var failureCount = 0;
         var jobsFilePath = Path.Combine(_sessionMaskOutputDirectory, "batch-jobs.json");
@@ -820,7 +813,6 @@ internal sealed class MainForm : Form
                 output = outputPaths[index],
                 mask = GetEffectiveMaskPathForProcessing(file, modelName),
                 trim = _trimCheckBox.Checked,
-                mode = saveMode,
             }).ToArray();
             File.WriteAllText(jobsFilePath, JsonSerializer.Serialize(jobs)); // UTF-8 without BOM
 
@@ -839,10 +831,7 @@ internal sealed class MainForm : Form
                 if (parts[0] == "DONE")
                 {
                     successCount++;
-                    var savedCount = parts.Length > 2 && int.TryParse(parts[2], out var count) ? count : 1;
-                    AppendLog(saveMode == SaveModeSingle
-                        ? $"저장 완료: {outputPaths[index]}"
-                        : $"저장 완료: {Path.GetFileName(files[index])} → {savedCount}개 파일 ({Path.GetFileNameWithoutExtension(outputPaths[index])}_*.png)");
+                    AppendLog($"저장 완료: {outputPaths[index]}");
                 }
                 else if (parts[0] == "FAIL")
                 {
@@ -890,16 +879,64 @@ internal sealed class MainForm : Form
         }
     }
 
-    private static string BuildUniqueOutputPath(string outputDirectory, string inputFilePath, ISet<string> reservedPaths)
+    private static string BuildUniqueOutputPath(string outputDirectory, string inputFilePath, ISet<string> reservedPaths, string suffix = "_nuggi")
     {
         var stem = Path.GetFileNameWithoutExtension(inputFilePath);
-        var candidate = Path.Combine(outputDirectory, $"{stem}_nuggi.png");
+        var candidate = Path.Combine(outputDirectory, $"{stem}{suffix}.png");
         for (var counter = 1; File.Exists(candidate) || !reservedPaths.Add(candidate); counter++)
         {
-            candidate = Path.Combine(outputDirectory, $"{stem}_nuggi_{counter}.png");
+            candidate = Path.Combine(outputDirectory, $"{stem}{suffix}_{counter}.png");
         }
 
         return candidate;
+    }
+
+    // Saves the selected image's current mask (hand edits included) as black background + white kept area,
+    // at the original image size so it lines up with the source.
+    private async Task SaveCurrentMaskAsync()
+    {
+        if (_isProcessing || _fileListBox.SelectedItem is not string selectedFile)
+        {
+            return;
+        }
+
+        var outputDirectory = _outputDirectoryTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(outputDirectory))
+        {
+            MessageBox.Show(this, "출력 폴더를 지정해 주세요.", "Nuggi", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var modelName = SelectedModelName;
+        _saveMaskButton.Enabled = false;
+        try
+        {
+            await EnsureMaskReadyAsync(selectedFile, modelName);
+            Directory.CreateDirectory(outputDirectory);
+            var outputPath = BuildUniqueOutputPath(outputDirectory, selectedFile, new HashSet<string>(), "_mask");
+            await Task.Run(() =>
+            {
+                using var mask = LoadEffectiveMaskBitmap(selectedFile, modelName);
+                MaskPreviewRenderer.SaveMask(mask, outputPath);
+            });
+            AppendLog($"마스크 저장 완료: {outputPath}");
+            SetStatus($"마스크를 저장했습니다: {Path.GetFileName(outputPath)}");
+        }
+        catch (OperationCanceledException) when (_closingCts.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"마스크 저장 오류: {Path.GetFileName(selectedFile)} - {ex.Message}");
+            MessageBox.Show(this, "마스크를 저장하지 못했습니다.\n\n" + ex.Message, "Nuggi", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            if (!IsDisposed)
+            {
+                UpdateUiState();
+            }
+        }
     }
 
     private async Task<Bitmap> SelectObjectMaskAsync(string inputFilePath, Point imagePoint)

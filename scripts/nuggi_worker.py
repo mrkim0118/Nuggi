@@ -11,17 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from nuggi.background_remover import (
-    BackgroundRemovalError,
-    BackgroundRemover,
-    split_mask_components,
-    trim_transparent_padding,
-)
-
-# Batch save modes (the "mode" field of a job).
-MODE_SINGLE = "single"      # one PNG with everything the mask keeps
-MODE_SPLIT = "split"        # one PNG per separate region of the mask
-MODE_OBJECTS = "objects"    # one PNG per detected object, named by its kind
+from nuggi.background_remover import BackgroundRemover, trim_transparent_padding
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -70,64 +60,27 @@ def save_converted(input_path: Path, output_path: Path) -> None:
     BackgroundRemover.load_image(input_path).save(output_path, format="PNG")
 
 
-def unique_path(candidate: Path) -> Path:
-    path, counter = candidate, 1
-    while path.exists():
-        path = candidate.with_name(f"{candidate.stem}-{counter}{candidate.suffix}")
-        counter += 1
-    return path
+def run_job(remover: BackgroundRemover, job: dict) -> None:
+    input_path = Path(job["input"])
+    output_path = Path(job["output"])
+    mask_path = Path(job["mask"])
 
+    normalized = remover.load_image(input_path)
 
-def load_or_create_mask(remover: BackgroundRemover, image: Image.Image, mask_path: Path) -> Image.Image:
     if mask_path.is_file():
         with Image.open(mask_path) as source_mask:
-            return source_mask.convert("L")
-
-    mask_image = remover.generate_mask(image)
-    mask_path.parent.mkdir(parents=True, exist_ok=True)
-    mask_image.save(mask_path, format="PNG")
-    return mask_image
-
-
-def run_job(remover: BackgroundRemover, job: dict) -> list[Path]:
-    """Saves the job's cutout(s) and returns the written files."""
-    output_path = Path(job["output"])
-    mode = job.get("mode", MODE_SINGLE)
-    image = remover.load_image(Path(job["input"]))
-
-    if mode == MODE_OBJECTS:
-        # Detection decides the regions, so the saved/edited mask is not used here.
-        named_masks = remover.cut_detected_objects(image)
-        if not named_masks:
-            raise BackgroundRemovalError("No known objects were found in this image.")
-        pieces = [
-            (output_path.with_name(f"{output_path.stem}_{number}_{label.replace(' ', '-')}.png"), mask)
-            for number, (label, mask) in enumerate(named_masks, start=1)
-        ]
+            mask_image = source_mask.convert("L")
     else:
-        mask_image = load_or_create_mask(remover, image, Path(job["mask"]))
-        if mode == MODE_SPLIT:
-            parts = split_mask_components(mask_image)
-            if not parts:
-                raise BackgroundRemovalError("The mask is empty, so there is nothing to split.")
-            pieces = [
-                (output_path.with_name(f"{output_path.stem}_{number}.png"), part)
-                for number, part in enumerate(parts, start=1)
-            ]
-        else:
-            pieces = [(output_path, mask_image)]
+        mask_image = remover.generate_mask(normalized)
+        mask_path.parent.mkdir(parents=True, exist_ok=True)
+        mask_image.save(mask_path, format="PNG")
+
+    result_image = remover.apply_mask(normalized, mask_image)
+    if job.get("trim"):
+        result_image = trim_transparent_padding(result_image)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    written = []
-    for path, mask in pieces:
-        result_image = remover.apply_mask(image, mask)
-        if job.get("trim"):
-            result_image = trim_transparent_padding(result_image)
-        # The app picks a free name for single saves; split/object names are made here, so never overwrite.
-        path = path if mode == MODE_SINGLE else unique_path(path)
-        result_image.save(path, format="PNG")
-        written.append(path)
-    return written
+    result_image.save(output_path, format="PNG")
 
 
 def run_batch(jobs_path: Path, model_name: str) -> None:
@@ -137,8 +90,8 @@ def run_batch(jobs_path: Path, model_name: str) -> None:
 
     for index, job in enumerate(jobs):
         try:
-            written = run_job(remover, job)
-            print(f"DONE\t{index}\t{len(written)}", flush=True)
+            run_job(remover, job)
+            print(f"DONE\t{index}", flush=True)
         except Exception as exc:
             message = str(exc).replace("\n", " ").replace("\t", " ") or type(exc).__name__
             print(f"FAIL\t{index}\t{message}", flush=True)

@@ -41,6 +41,7 @@ robocopy "nuggi" "%PUBLISH_DIR%\nuggi" /E /XD "__pycache__" >nul
 if errorlevel 8 goto :error
 copy /Y "requirements.txt" "%PUBLISH_DIR%\requirements.txt" >nul
 copy /Y "README.md" "%PUBLISH_DIR%\README.md" >nul
+copy /Y "README.ko.md" "%PUBLISH_DIR%\README.ko.md" >nul
 
 echo [4/6] Copying bundled model cache when available...
 if exist "%USER_MODEL_DIR%" (

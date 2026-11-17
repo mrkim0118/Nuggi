@@ -12,7 +12,7 @@ Author: **Manggdy**
 
 - Add image files one by one, or every supported image in a folder (subfolders included)
 - Side-by-side preview: the original image and the detected subject area
-- Mask editor: paint to add or erase areas, brush size, zoom, undo (`Ctrl+Z`), delete the whole area, reset to the automatic mask
+- Mask editor: paint to add or erase areas, brush size, zoom, undo (`Ctrl+Z`), invert the selection (`선택 영역 반전`), delete the whole area (`영역 전체 삭제`), reset to the automatic mask
 - **Object click** in the mask editor: click an object to add or erase just that object (Segment Anything)
 - `마스크 저장`: save the selected image's mask as a black-and-white PNG (white = kept area), hand edits included
 - Batch export to transparent PNG; one failed image does not stop the rest, and the log shows why it failed

@@ -38,9 +38,12 @@ internal static class Theme
         form.Font = BaseFont;
     }
 
-    public static Panel Card(Padding padding)
+    public static Panel Card(Padding padding) => Card<Panel>(padding);
+
+    // A FlowLayoutPanel card wraps its own rows; a plain Panel card around one would not grow to fit them.
+    public static T Card<T>(Padding padding) where T : Panel, new()
     {
-        var card = new Panel
+        var card = new T
         {
             BackColor = Surface,
             Padding = padding,

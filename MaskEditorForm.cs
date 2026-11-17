@@ -81,25 +81,19 @@ internal sealed class MaskEditorForm : Form
             Padding = new Padding(16),
             BackColor = Theme.Background,
         };
+        // Without a fixed column width the table grows to its widest row and pushes the toolbar and footer off-screen.
+        rootLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         rootLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         Controls.Add(rootLayout);
 
-        var toolbar = Theme.Card(new Padding(16, 12, 16, 12));
-        toolbar.Margin = new Padding(0, 0, 0, 12);
-        toolbar.AutoSize = true;
-        toolbar.Dock = DockStyle.Fill;
-        rootLayout.Controls.Add(toolbar, 0, 0);
-
-        var toolbarLayout = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            AutoSize = true,
-            WrapContents = true,
-            FlowDirection = FlowDirection.LeftToRight,
-        };
-        toolbar.Controls.Add(toolbarLayout);
+        var toolbarLayout = Theme.Card<FlowLayoutPanel>(new Padding(16, 12, 16, 6));
+        toolbarLayout.Margin = new Padding(0, 0, 0, 12);
+        toolbarLayout.Dock = DockStyle.Fill;
+        toolbarLayout.AutoSize = true;
+        toolbarLayout.WrapContents = true;
+        rootLayout.Controls.Add(toolbarLayout, 0, 0);
 
         // Each toggle pair needs its own container: radio buttons in one parent form a single group.
         toolbarLayout.Controls.Add(CreateToggleGroup("도구", _brushToolRadioButton, "브러시", _objectToolRadioButton, "객체 클릭"));
@@ -139,7 +133,8 @@ internal sealed class MaskEditorForm : Form
         });
 
         var zoomOutButton = Theme.SecondaryButton("-", (_, _) => ChangeZoom(0.8f));
-        zoomOutButton.Margin = new Padding(0, 0, 6, 0);
+        zoomOutButton.Margin = new Padding(0, 0, 6, 6);
+        zoomOutButton.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         toolbarLayout.Controls.Add(zoomOutButton);
 
         _zoomLabel.AutoSize = true;
@@ -147,23 +142,28 @@ internal sealed class MaskEditorForm : Form
         toolbarLayout.Controls.Add(_zoomLabel);
 
         var zoomInButton = Theme.SecondaryButton("+", (_, _) => ChangeZoom(1.25f));
-        zoomInButton.Margin = new Padding(0, 0, 6, 0);
+        zoomInButton.Margin = new Padding(0, 0, 6, 6);
+        zoomInButton.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         toolbarLayout.Controls.Add(zoomInButton);
 
         var fitButton = Theme.SecondaryButton("맞춤", (_, _) => ZoomToFitCanvas());
-        fitButton.Margin = new Padding(0, 0, 20, 0);
+        fitButton.Margin = new Padding(0, 0, 20, 6);
         toolbarLayout.Controls.Add(fitButton);
 
         var undoButton = Theme.SecondaryButton("실행 취소 (Ctrl+Z)", (_, _) => _canvas.Undo());
-        undoButton.Margin = new Padding(0, 0, 6, 0);
+        undoButton.Margin = new Padding(0, 0, 6, 6);
         toolbarLayout.Controls.Add(undoButton);
 
+        var invertButton = Theme.SecondaryButton("선택 영역 반전", (_, _) => _canvas.InvertMask());
+        invertButton.Margin = new Padding(0, 0, 6, 6);
+        toolbarLayout.Controls.Add(invertButton);
+
         var clearButton = Theme.SecondaryButton("영역 전체 삭제", (_, _) => _canvas.ClearMask());
-        clearButton.Margin = new Padding(0, 0, 6, 0);
+        clearButton.Margin = new Padding(0, 0, 6, 6);
         toolbarLayout.Controls.Add(clearButton);
 
         var resetButton = Theme.SecondaryButton("자동 마스크로 되돌리기", (_, _) => _canvas.ResetToBaseline());
-        resetButton.Margin = new Padding(0, 0, 12, 0);
+        resetButton.Margin = new Padding(0, 0, 12, 6);
         toolbarLayout.Controls.Add(resetButton);
 
         var canvasCard = Theme.Card(new Padding(1));

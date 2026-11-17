@@ -116,6 +116,39 @@ internal sealed class MaskCanvasControl : Control
         Invalidate();
     }
 
+    // Kept area becomes removed and removed becomes kept; soft edges flip too (v -> 255 - v).
+    public void InvertMask()
+    {
+        if (_maskImage is null)
+        {
+            return;
+        }
+
+        PushUndoSnapshot();
+        var rect = new Rectangle(Point.Empty, _maskImage.Size);
+        var data = _maskImage.LockBits(rect, ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
+        try
+        {
+            var buffer = new byte[Math.Abs(data.Stride) * rect.Height];
+            Marshal.Copy(data.Scan0, buffer, 0, buffer.Length);
+            for (var index = 0; index < buffer.Length; index += 4)
+            {
+                var inverted = (byte)(255 - buffer[index + 2]);
+                buffer[index] = buffer[index + 1] = buffer[index + 2] = inverted;
+                buffer[index + 3] = 255;
+            }
+
+            Marshal.Copy(buffer, 0, data.Scan0, buffer.Length);
+        }
+        finally
+        {
+            _maskImage.UnlockBits(data);
+        }
+
+        _displayMaskDirty = true;
+        Invalidate();
+    }
+
     // Adds the object's area to the mask (add mode) or removes it (remove mode).
     public void ApplyObjectMask(Bitmap objectMask)
     {

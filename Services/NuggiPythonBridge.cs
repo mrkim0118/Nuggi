@@ -48,6 +48,25 @@ internal sealed class NuggiPythonBridge
             cancellationToken);
     }
 
+    // shortcut: each click starts a new worker and re-encodes the image (~3-5 s); keep one worker per open editor if clicks feel slow.
+    public Task SelectObjectAsync(string inputPath, Point imagePoint, string maskOutputPath, CancellationToken cancellationToken = default)
+    {
+        return RunPythonAsync(
+            [
+                _paths.WorkerScriptPath,
+                "select",
+                "--input",
+                inputPath,
+                "--output",
+                maskOutputPath,
+                "--x",
+                imagePoint.X.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "--y",
+                imagePoint.Y.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ],
+            cancellationToken);
+    }
+
     public Task ConvertToPngAsync(string inputPath, string outputPath, CancellationToken cancellationToken = default)
     {
         return RunPythonAsync([_paths.WorkerScriptPath, "convert", "--input", inputPath, "--output", outputPath], cancellationToken);

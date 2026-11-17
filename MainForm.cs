@@ -31,6 +31,11 @@ internal sealed class MainForm : Form
     private readonly TextBox _outputDirectoryTextBox = new();
     private readonly ComboBox _modelComboBox = new();
     private readonly CheckBox _trimCheckBox = new();
+    private readonly ComboBox _saveModeComboBox = new();
+
+    // Batch save modes understood by scripts/nuggi_worker.py.
+    private const string SaveModeSingle = "single";
+    private static readonly string[] SaveModes = [SaveModeSingle, "split", "objects"];
     private readonly Button _startButton = new();
     private readonly Button _openOutputButton = new();
     private readonly Button _editMaskButton = new();
@@ -66,6 +71,7 @@ internal sealed class MainForm : Form
 
         _outputDirectoryTextBox.Text = Path.Combine(_appPaths.RootDirectory, "output");
         _modelComboBox.SelectedIndex = 0;
+        _saveModeComboBox.SelectedIndex = 0;
         _trimCheckBox.Checked = true;
 
         TryDeleteStaleTempFiles();
@@ -238,6 +244,13 @@ internal sealed class MainForm : Form
         _modelComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
         _modelComboBox.Items.AddRange(["u2net · 기본 (자동 보정 포함)", "u2netp · 가벼움 (속도 우선)"]);
         AddRow(_modelComboBox);
+
+        AddRow(Theme.FieldLabel("저장 방식"));
+        _saveModeComboBox.Dock = DockStyle.Fill;
+        _saveModeComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
+        // Same order as SaveModes.
+        _saveModeComboBox.Items.AddRange(["한 장으로 저장", "떨어진 덩어리별로 따로 저장", "자동 인식한 사물별로 따로 저장"]);
+        AddRow(_saveModeComboBox);
 
         _trimCheckBox.Text = "피사체에 맞춰 빈 여백 잘라내기";
         _trimCheckBox.AutoSize = true;
@@ -557,6 +570,7 @@ internal sealed class MainForm : Form
         _fileListBox.Enabled = !_isProcessing;
         _modelComboBox.Enabled = !_isProcessing;
         _trimCheckBox.Enabled = !_isProcessing;
+        _saveModeComboBox.Enabled = !_isProcessing;
         _outputDirectoryTextBox.Enabled = !_isProcessing;
     }
 
@@ -727,7 +741,12 @@ internal sealed class MainForm : Form
             using var baselineMask = await Task.Run(() => MaskPreviewRenderer.LoadMaskBitmap(autoMaskPath));
             using var initialMask = GetEditedMaskClone(selectedFile, modelName) ?? (Bitmap)baselineMask.Clone();
 
-            using var editor = new MaskEditorForm(Path.GetFileName(selectedFile), originalImage, initialMask, baselineMask);
+            using var editor = new MaskEditorForm(
+                Path.GetFileName(selectedFile),
+                originalImage,
+                initialMask,
+                baselineMask,
+                imagePoint => SelectObjectMaskAsync(selectedFile, imagePoint));
             if (editor.ShowDialog(this) != DialogResult.OK || editor.ResultMask is null)
             {
                 SetPreviewStatus("영역 편집을 취소했습니다.");
@@ -784,6 +803,7 @@ internal sealed class MainForm : Form
         UpdateUiState();
 
         var modelName = SelectedModelName;
+        var saveMode = SaveModes[Math.Max(0, _saveModeComboBox.SelectedIndex)];
         var successCount = 0;
         var failureCount = 0;
         var jobsFilePath = Path.Combine(_sessionMaskOutputDirectory, "batch-jobs.json");
@@ -800,6 +820,7 @@ internal sealed class MainForm : Form
                 output = outputPaths[index],
                 mask = GetEffectiveMaskPathForProcessing(file, modelName),
                 trim = _trimCheckBox.Checked,
+                mode = saveMode,
             }).ToArray();
             File.WriteAllText(jobsFilePath, JsonSerializer.Serialize(jobs)); // UTF-8 without BOM
 
@@ -818,7 +839,10 @@ internal sealed class MainForm : Form
                 if (parts[0] == "DONE")
                 {
                     successCount++;
-                    AppendLog($"저장 완료: {outputPaths[index]}");
+                    var savedCount = parts.Length > 2 && int.TryParse(parts[2], out var count) ? count : 1;
+                    AppendLog(saveMode == SaveModeSingle
+                        ? $"저장 완료: {outputPaths[index]}"
+                        : $"저장 완료: {Path.GetFileName(files[index])} → {savedCount}개 파일 ({Path.GetFileNameWithoutExtension(outputPaths[index])}_*.png)");
                 }
                 else if (parts[0] == "FAIL")
                 {
@@ -876,6 +900,20 @@ internal sealed class MainForm : Form
         }
 
         return candidate;
+    }
+
+    private async Task<Bitmap> SelectObjectMaskAsync(string inputFilePath, Point imagePoint)
+    {
+        var maskPath = Path.Combine(_sessionMaskOutputDirectory, $"select-{Guid.NewGuid():N}.png");
+        try
+        {
+            await _pythonBridge.SelectObjectAsync(inputFilePath, imagePoint, maskPath, _closingCts.Token);
+            return await Task.Run(() => MaskPreviewRenderer.LoadMaskBitmap(maskPath));
+        }
+        finally
+        {
+            TryDeleteFile(maskPath);
+        }
     }
 
     // GDI+ cannot open WebP, so the UI previews a PNG copy converted by Python.

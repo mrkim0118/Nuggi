@@ -8,8 +8,13 @@ Author: **Manggdy**
 
 - Add image files one by one, or every supported image in a folder (subfolders included)
 - Side-by-side preview: the original image and the detected subject area
-- Mask editor: paint to add or erase areas, brush size, zoom, undo (`Ctrl+Z`), reset to the automatic mask
+- Mask editor: paint to add or erase areas, brush size, zoom, undo (`Ctrl+Z`), clear all, reset to the automatic mask
+- **Object click** in the mask editor: click an object to add or erase just that object (Segment Anything)
 - Batch export to transparent PNG; one failed image does not stop the rest, and the log shows why it failed
+- Three save modes:
+  - **한 장으로 저장**: one PNG with everything the mask keeps
+  - **떨어진 덩어리별로 따로 저장**: one PNG per separate region of the mask (regions that touch stay together)
+  - **자동 인식한 사물별로 따로 저장**: finds objects (person, bottle, cup, bowl, … 80 kinds) and saves each as its own PNG, even when they overlap
 - Optional trimming of empty transparent margins around the subject
 - Automatic retry with another already-downloaded model when the first mask covers almost the whole image or almost nothing
 - Closing the window stops any running background work
@@ -18,6 +23,8 @@ Author: **Manggdy**
 
 - UI: C# WinForms (.NET 8)
 - Background removal engine: Python `rembg` (Pillow, onnxruntime)
+- Object selection: Segment Anything ViT-B, quantized (`sam_vit_b_01ec64`, Apache-2.0)
+- Object detection: Mask R-CNN from the ONNX Model Zoo (`MaskRCNN-12.onnx`, MIT, COCO classes)
 - Output: transparent PNG
 
 ## Run
@@ -33,7 +40,7 @@ If the app reports that Python could not be found, the `.venv` folder points to 
 
 ## First run
 
-The first background-removal run downloads the segmentation model automatically (about 170 MB for `u2net`).
+The first background-removal run downloads the segmentation model automatically (about 170 MB for `u2net`). Object click downloads Segment Anything on first use (about 113 MB), and the object save mode downloads Mask R-CNN (about 170 MB). Release packages already include all of them.
 
 The automatic mask retry only uses fallback models that are already downloaded (in `.u2net` or `%USERPROFILE%\.u2net`), so it never starts a large download in the middle of a batch.
 
@@ -42,8 +49,11 @@ The automatic mask retry only uses fallback models that are already downloaded (
 1. Click `파일 추가` or `폴더 추가`
 2. Select an image in the list
 3. Check the previews on the right: green is the area that will be kept
-4. Optional: click `영역 편집` to add or erase areas by hand, then `편집 적용`
-5. Choose the save folder, model, and trim option
+4. Optional: click `영역 편집` to change the area, then `편집 적용`
+   - `브러시`: paint with the mouse
+   - `객체 클릭`: click an object; `영역 추가` adds it, `영역 지우기` removes it
+   - To keep only one object: `모두 지우기`, then `객체 클릭` + `영역 추가` and click that object
+5. Choose the save folder, model, save mode, and trim option
 6. Click `누끼 추출 시작`
 
 Hand-edited masks are kept until the app closes.
@@ -60,6 +70,9 @@ Hand-edited masks are kept until the app closes.
 
 - `photo.jpg` -> `photo_nuggi.png`
 - If the name already exists (or two inputs share a name), Nuggi saves `photo_nuggi_1.png`, `photo_nuggi_2.png`, and so on.
+- Region mode: `photo_nuggi_1.png`, `photo_nuggi_2.png`, … (largest region first)
+- Object mode: `photo_nuggi_1_person.png`, `photo_nuggi_2_bottle.png`, … (most confident first)
+- Region and object files never overwrite existing files; a `-1`, `-2` suffix is added instead.
 
 ## Temporary files
 

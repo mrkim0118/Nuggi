@@ -4,17 +4,30 @@ namespace Nuggi;
 
 internal sealed class MaskEditorForm : Form
 {
+    private const string DefaultHint = "브러시: 마우스 왼쪽 버튼으로 칠합니다.  객체 클릭: 사물을 클릭하면 그 사물 영역만 추가하거나 지웁니다.  Ctrl+휠 = 확대/축소  ·  Ctrl+Z = 실행 취소";
+
     private readonly MaskCanvasControl _canvas = new();
     private readonly Panel _canvasHostPanel = new();
+    private readonly RadioButton _brushToolRadioButton = new();
+    private readonly RadioButton _objectToolRadioButton = new();
     private readonly RadioButton _addRadioButton = new();
     private readonly RadioButton _removeRadioButton = new();
     private readonly TrackBar _brushSizeTrackBar = new();
     private readonly Label _brushSizeLabel = new();
     private readonly Label _zoomLabel = new();
+    private readonly Label _hintLabel = new();
+    private readonly Func<Point, Task<Bitmap>> _selectObjectAsync;
     private bool _fitMode = true;
 
-    public MaskEditorForm(string fileName, Bitmap originalImage, Bitmap initialMask, Bitmap baselineMask)
+    // selectObjectAsync returns the mask of the object at an image point (Segment Anything in the Python worker).
+    public MaskEditorForm(
+        string fileName,
+        Bitmap originalImage,
+        Bitmap initialMask,
+        Bitmap baselineMask,
+        Func<Point, Task<Bitmap>> selectObjectAsync)
     {
+        _selectObjectAsync = selectObjectAsync;
         Text = $"영역 편집 - {fileName}";
         StartPosition = FormStartPosition.CenterParent;
         MinimumSize = new Size(1200, 840);
@@ -88,25 +101,9 @@ internal sealed class MaskEditorForm : Form
         };
         toolbar.Controls.Add(toolbarLayout);
 
-        toolbarLayout.Controls.Add(new Label
-        {
-            AutoSize = true,
-            Text = "브러시",
-            Font = Theme.LabelFont,
-            ForeColor = Theme.MutedText,
-            Margin = new Padding(0, 9, 8, 0),
-        });
-
-        _addRadioButton.Text = "영역 추가";
-        _addRadioButton.Checked = true;
-        Theme.StyleToggle(_addRadioButton);
-        _addRadioButton.Margin = new Padding(0, 2, 0, 0);
-        toolbarLayout.Controls.Add(_addRadioButton);
-
-        _removeRadioButton.Text = "영역 지우기";
-        Theme.StyleToggle(_removeRadioButton);
-        _removeRadioButton.Margin = new Padding(0, 2, 24, 0);
-        toolbarLayout.Controls.Add(_removeRadioButton);
+        // Each toggle pair needs its own container: radio buttons in one parent form a single group.
+        toolbarLayout.Controls.Add(CreateToggleGroup("도구", _brushToolRadioButton, "브러시", _objectToolRadioButton, "객체 클릭"));
+        toolbarLayout.Controls.Add(CreateToggleGroup("동작", _addRadioButton, "영역 추가", _removeRadioButton, "영역 지우기"));
 
         toolbarLayout.Controls.Add(new Label
         {
@@ -161,6 +158,10 @@ internal sealed class MaskEditorForm : Form
         undoButton.Margin = new Padding(0, 0, 6, 0);
         toolbarLayout.Controls.Add(undoButton);
 
+        var clearButton = Theme.SecondaryButton("모두 지우기", (_, _) => _canvas.ClearMask());
+        clearButton.Margin = new Padding(0, 0, 6, 0);
+        toolbarLayout.Controls.Add(clearButton);
+
         var resetButton = Theme.SecondaryButton("자동 마스크로 되돌리기", (_, _) => _canvas.ResetToBaseline());
         resetButton.Margin = new Padding(0, 0, 12, 0);
         toolbarLayout.Controls.Add(resetButton);
@@ -194,14 +195,12 @@ internal sealed class MaskEditorForm : Form
         footerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         footer.Controls.Add(footerLayout);
 
-        footerLayout.Controls.Add(new Label
-        {
-            AutoSize = true,
-            Text = "마우스 왼쪽 버튼으로 칠하면 바로 반영됩니다.  초록색 = 남길 부분  ·  Ctrl+휠 = 확대/축소  ·  Ctrl+Z = 실행 취소",
-            ForeColor = Theme.MutedText,
-            Font = Theme.SmallFont,
-            Margin = new Padding(0, 8, 0, 0),
-        }, 0, 0);
+        _hintLabel.AutoSize = true;
+        _hintLabel.Text = DefaultHint;
+        _hintLabel.ForeColor = Theme.MutedText;
+        _hintLabel.Font = Theme.SmallFont;
+        _hintLabel.Margin = new Padding(0, 8, 0, 0);
+        footerLayout.Controls.Add(_hintLabel, 0, 0);
 
         var actionButtons = new FlowLayoutPanel
         {
@@ -229,6 +228,12 @@ internal sealed class MaskEditorForm : Form
 
         _addRadioButton.CheckedChanged += (_, _) => _canvas.IsAddMode = _addRadioButton.Checked;
         _removeRadioButton.CheckedChanged += (_, _) => _canvas.IsAddMode = !_removeRadioButton.Checked;
+        _objectToolRadioButton.CheckedChanged += (_, _) =>
+        {
+            _canvas.IsObjectMode = _objectToolRadioButton.Checked;
+            _brushSizeTrackBar.Enabled = !_objectToolRadioButton.Checked;
+        };
+        _canvas.ObjectClicked += async (_, imagePoint) => await SelectObjectAtAsync(imagePoint);
         _canvas.ZoomChanged += (_, _) => UpdateZoomLabel();
         _canvas.MouseWheel += (_, e) => HandleCanvasMouseWheel(e);
         _canvasHostPanel.MouseWheel += (_, e) => HandleCanvasMouseWheel(e);
@@ -314,6 +319,67 @@ internal sealed class MaskEditorForm : Form
         ResultMask = _canvas.ExportMask();
         DialogResult = DialogResult.OK;
         Close();
+    }
+
+    private async Task SelectObjectAtAsync(Point imagePoint)
+    {
+        _canvas.Enabled = false;
+        UseWaitCursor = true;
+        _hintLabel.Text = "클릭한 사물의 영역을 찾는 중입니다... (처음 한 번은 조금 더 걸립니다)";
+
+        try
+        {
+            using var objectMask = await _selectObjectAsync(imagePoint);
+            if (!IsDisposed)
+            {
+                _canvas.ApplyObjectMask(objectMask);
+                _hintLabel.Text = DefaultHint;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            if (!IsDisposed)
+            {
+                _hintLabel.Text = DefaultHint;
+                MessageBox.Show(this, "사물 영역을 찾지 못했습니다.\n\n" + ex.Message, "Nuggi", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+        finally
+        {
+            if (!IsDisposed)
+            {
+                UseWaitCursor = false;
+                _canvas.Enabled = true;
+            }
+        }
+    }
+
+    private static Control CreateToggleGroup(string title, RadioButton first, string firstText, RadioButton second, string secondText)
+    {
+        var group = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 24, 0) };
+        group.Controls.Add(new Label
+        {
+            AutoSize = true,
+            Text = title,
+            Font = Theme.LabelFont,
+            ForeColor = Theme.MutedText,
+            Margin = new Padding(0, 9, 8, 0),
+        });
+
+        first.Text = firstText;
+        first.Checked = true;
+        Theme.StyleToggle(first);
+        first.Margin = new Padding(0, 2, 0, 0);
+        group.Controls.Add(first);
+
+        second.Text = secondText;
+        Theme.StyleToggle(second);
+        second.Margin = new Padding(0, 2, 0, 0);
+        group.Controls.Add(second);
+        return group;
     }
 
 }

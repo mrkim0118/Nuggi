@@ -25,6 +25,7 @@ internal sealed class MaskCanvasControl : Control
     private Point? _hoverImagePoint;
     private Point? _lastStrokeImagePoint;
     private float _zoom = 1f;
+    private bool _isObjectMode;
 
     public MaskCanvasControl()
     {
@@ -46,6 +47,20 @@ internal sealed class MaskCanvasControl : Control
     public int BrushSize { get; set; }
 
     public bool IsAddMode { get; set; }
+
+    // In object mode a click reports the image point (ObjectClicked) instead of painting.
+    public bool IsObjectMode
+    {
+        get => _isObjectMode;
+        set
+        {
+            _isObjectMode = value;
+            Cursor = value ? Cursors.Hand : Cursors.Cross;
+            Invalidate();
+        }
+    }
+
+    public event EventHandler<Point>? ObjectClicked;
 
     public float Zoom => _zoom;
 
@@ -79,6 +94,65 @@ internal sealed class MaskCanvasControl : Control
         using var graphics = Graphics.FromImage(_maskImage);
         graphics.CompositingMode = CompositingMode.SourceCopy;
         graphics.DrawImage(_baselineMaskImage, 0, 0, _maskImage.Width, _maskImage.Height);
+
+        _displayMaskDirty = true;
+        Invalidate();
+    }
+
+    public void ClearMask()
+    {
+        if (_maskImage is null)
+        {
+            return;
+        }
+
+        PushUndoSnapshot();
+        using (var graphics = Graphics.FromImage(_maskImage))
+        {
+            graphics.Clear(Color.Black);
+        }
+
+        _displayMaskDirty = true;
+        Invalidate();
+    }
+
+    // Adds the object's area to the mask (add mode) or removes it (remove mode).
+    public void ApplyObjectMask(Bitmap objectMask)
+    {
+        if (_maskImage is null)
+        {
+            return;
+        }
+
+        PushUndoSnapshot();
+        using var sized = objectMask.Size == _maskImage.Size ? (Bitmap)objectMask.Clone() : ResizeMaskBitmap(objectMask, _maskImage.Size);
+        var rect = new Rectangle(Point.Empty, _maskImage.Size);
+        var maskData = _maskImage.LockBits(rect, ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
+        var objectData = sized.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+
+        try
+        {
+            var maskBuffer = new byte[Math.Abs(maskData.Stride) * rect.Height];
+            var objectBuffer = new byte[Math.Abs(objectData.Stride) * rect.Height];
+            Marshal.Copy(maskData.Scan0, maskBuffer, 0, maskBuffer.Length);
+            Marshal.Copy(objectData.Scan0, objectBuffer, 0, objectBuffer.Length);
+
+            for (var index = 0; index < maskBuffer.Length; index += 4)
+            {
+                var objectValue = objectBuffer[index + 2];
+                var current = maskBuffer[index + 2];
+                var value = IsAddMode ? Math.Max(current, objectValue) : Math.Min(current, (byte)(255 - objectValue));
+                maskBuffer[index] = maskBuffer[index + 1] = maskBuffer[index + 2] = (byte)value;
+                maskBuffer[index + 3] = 255;
+            }
+
+            Marshal.Copy(maskBuffer, 0, maskData.Scan0, maskBuffer.Length);
+        }
+        finally
+        {
+            _maskImage.UnlockBits(maskData);
+            sized.UnlockBits(objectData);
+        }
 
         _displayMaskDirty = true;
         Invalidate();
@@ -224,6 +298,12 @@ internal sealed class MaskCanvasControl : Control
         }
 
         Focus();
+        if (_isObjectMode)
+        {
+            ObjectClicked?.Invoke(this, imagePoint);
+            return;
+        }
+
         PushUndoSnapshot();
         _isDrawing = true;
         _hoverImagePoint = imagePoint;
@@ -350,7 +430,7 @@ internal sealed class MaskCanvasControl : Control
 
     private void DrawBrushPreview(Graphics graphics)
     {
-        if (_originalImage is null || _hoverImagePoint is null || _displayImageBounds.IsEmpty)
+        if (_isObjectMode || _originalImage is null || _hoverImagePoint is null || _displayImageBounds.IsEmpty)
         {
             return;
         }

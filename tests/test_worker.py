@@ -51,7 +51,8 @@ class BatchTest(unittest.TestCase):
                 {"input": str(good), "output": str(root / "out" / "b.png"), "mask": str(mask), "trim": True},
             ]
             jobs_path = root / "jobs.json"
-            jobs_path.write_text(json.dumps(jobs), encoding="utf-8")
+            # utf-8-sig adds a BOM, like .NET Encoding.UTF8 does; the worker must still read it.
+            jobs_path.write_text(json.dumps(jobs, ensure_ascii=False), encoding="utf-8-sig")
 
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):

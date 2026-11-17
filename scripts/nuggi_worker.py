@@ -72,7 +72,7 @@ def run_job(remover: BackgroundRemover, job: dict) -> None:
 
 
 def run_batch(jobs_path: Path, model_name: str) -> None:
-    jobs = json.loads(jobs_path.read_text(encoding="utf-8"))
+    jobs = json.loads(jobs_path.read_text(encoding="utf-8-sig"))  # accepts files with or without a BOM
     # One remover for the whole batch, so each model is loaded once instead of once per image.
     remover = BackgroundRemover(model_name=model_name)
 

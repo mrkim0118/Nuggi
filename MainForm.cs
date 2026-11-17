@@ -801,7 +801,7 @@ internal sealed class MainForm : Form
                 mask = GetEffectiveMaskPathForProcessing(file, modelName),
                 trim = _trimCheckBox.Checked,
             }).ToArray();
-            File.WriteAllText(jobsFilePath, JsonSerializer.Serialize(jobs), Encoding.UTF8);
+            File.WriteAllText(jobsFilePath, JsonSerializer.Serialize(jobs)); // UTF-8 without BOM
 
             SetStatus($"[0/{files.Length}] 모델을 불러오는 중...");
             AppendLog($"{files.Length}개 파일 처리 시작 (모델: {modelName})");

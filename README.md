@@ -1,4 +1,8 @@
+<p align="center"><img src="Assets/icon.png" alt="Nuggi icon" width="128"></p>
+
 # Nuggi
+
+**English** | [한국어](README.ko.md)
 
 `Nuggi` is a Windows app for removing image backgrounds (누끼). Add images, check the detected subject in a live preview, fix the area by hand if needed, and save transparent PNG files in one batch.
 
@@ -93,9 +97,9 @@ The app itself is framework-dependent to keep its size smaller, so the target PC
 - `MainForm.cs`: main window (file list, settings, preview, batch run)
 - `MaskEditorForm.cs`, `Controls/MaskCanvasControl.cs`: mask editor
 - `Theme.cs`: shared colors, fonts, and control styles
-- `Assets/icon.ico`: app icon
+- `Assets/icon.ico`: app icon (`Assets/icon.png`: for the README)
 - `Services/NuggiPythonBridge.cs`: runs the Python worker
-- `scripts/nuggi_worker.py`: worker commands (`mask`, `convert`, `batch`)
+- `scripts/nuggi_worker.py`: worker commands (`mask`, `select`, `convert`, `batch`)
 - `nuggi/background_remover.py`: mask generation and quality check
 - `tests/test_worker.py`: Python tests
 - `run.bat`, `publish.bat`

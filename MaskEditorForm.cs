@@ -19,7 +19,7 @@ internal sealed class MaskEditorForm : Form
         StartPosition = FormStartPosition.CenterParent;
         MinimumSize = new Size(1200, 840);
         ClientSize = new Size(1360, 920);
-        BackColor = Color.FromArgb(243, 244, 246);
+        Theme.ApplyToForm(this);
 
         BuildUi();
         HookEvents();
@@ -35,6 +35,17 @@ internal sealed class MaskEditorForm : Form
     {
         base.OnShown(e);
         ZoomToFitCanvas();
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == (Keys.Control | Keys.Z))
+        {
+            _canvas.Undo();
+            return true;
+        }
+
+        return base.ProcessCmdKey(ref msg, keyData);
     }
 
     protected override void Dispose(bool disposing)
@@ -55,14 +66,15 @@ internal sealed class MaskEditorForm : Form
             ColumnCount = 1,
             RowCount = 3,
             Padding = new Padding(16),
-            BackColor = BackColor,
+            BackColor = Theme.Background,
         };
         rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         rootLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         Controls.Add(rootLayout);
 
-        var toolbar = BuildCardPanel(new Padding(16));
+        var toolbar = Theme.Card(new Padding(16, 12, 16, 12));
+        toolbar.Margin = new Padding(0, 0, 0, 12);
         toolbar.AutoSize = true;
         toolbar.Dock = DockStyle.Fill;
         rootLayout.Controls.Add(toolbar, 0, 0);
@@ -79,27 +91,30 @@ internal sealed class MaskEditorForm : Form
         toolbarLayout.Controls.Add(new Label
         {
             AutoSize = true,
-            Text = "초록색이 유지 영역입니다.",
-            Font = new Font("Malgun Gothic", 10, FontStyle.Bold),
-            Margin = new Padding(0, 6, 20, 0),
+            Text = "브러시",
+            Font = Theme.LabelFont,
+            ForeColor = Theme.MutedText,
+            Margin = new Padding(0, 9, 8, 0),
         });
 
-        _addRadioButton.Text = "추가 브러시";
+        _addRadioButton.Text = "영역 추가";
         _addRadioButton.Checked = true;
-        _addRadioButton.AutoSize = true;
-        _addRadioButton.Margin = new Padding(0, 8, 12, 0);
+        Theme.StyleToggle(_addRadioButton);
+        _addRadioButton.Margin = new Padding(0, 2, 0, 0);
         toolbarLayout.Controls.Add(_addRadioButton);
 
-        _removeRadioButton.Text = "제거 브러시";
-        _removeRadioButton.AutoSize = true;
-        _removeRadioButton.Margin = new Padding(0, 8, 20, 0);
+        _removeRadioButton.Text = "영역 지우기";
+        Theme.StyleToggle(_removeRadioButton);
+        _removeRadioButton.Margin = new Padding(0, 2, 24, 0);
         toolbarLayout.Controls.Add(_removeRadioButton);
 
         toolbarLayout.Controls.Add(new Label
         {
             AutoSize = true,
-            Text = "브러시 크기",
-            Margin = new Padding(0, 9, 12, 0),
+            Text = "크기",
+            Font = Theme.LabelFont,
+            ForeColor = Theme.MutedText,
+            Margin = new Padding(0, 9, 8, 0),
         });
 
         _brushSizeTrackBar.Minimum = 4;
@@ -108,7 +123,8 @@ internal sealed class MaskEditorForm : Form
         _brushSizeTrackBar.Value = 36;
         _brushSizeTrackBar.AutoSize = false;
         _brushSizeTrackBar.Width = 240;
-        _brushSizeTrackBar.Height = 36;
+        _brushSizeTrackBar.Height = 32;
+        _brushSizeTrackBar.TickStyle = TickStyle.None;
         _brushSizeTrackBar.Margin = new Padding(0, 0, 8, 0);
         toolbarLayout.Controls.Add(_brushSizeTrackBar);
 
@@ -119,11 +135,13 @@ internal sealed class MaskEditorForm : Form
         toolbarLayout.Controls.Add(new Label
         {
             AutoSize = true,
-            Text = "줌",
-            Margin = new Padding(0, 9, 12, 0),
+            Text = "확대",
+            Font = Theme.LabelFont,
+            ForeColor = Theme.MutedText,
+            Margin = new Padding(0, 9, 8, 0),
         });
 
-        var zoomOutButton = CreateButton("-", (_, _) => ChangeZoom(0.8f));
+        var zoomOutButton = Theme.SecondaryButton("-", (_, _) => ChangeZoom(0.8f));
         zoomOutButton.Margin = new Padding(0, 0, 6, 0);
         toolbarLayout.Controls.Add(zoomOutButton);
 
@@ -131,32 +149,37 @@ internal sealed class MaskEditorForm : Form
         _zoomLabel.Margin = new Padding(0, 9, 6, 0);
         toolbarLayout.Controls.Add(_zoomLabel);
 
-        var zoomInButton = CreateButton("+", (_, _) => ChangeZoom(1.25f));
+        var zoomInButton = Theme.SecondaryButton("+", (_, _) => ChangeZoom(1.25f));
         zoomInButton.Margin = new Padding(0, 0, 6, 0);
         toolbarLayout.Controls.Add(zoomInButton);
 
-        var fitButton = CreateButton("맞춤", (_, _) => ZoomToFitCanvas());
+        var fitButton = Theme.SecondaryButton("맞춤", (_, _) => ZoomToFitCanvas());
         fitButton.Margin = new Padding(0, 0, 20, 0);
         toolbarLayout.Controls.Add(fitButton);
 
-        var resetButton = CreateButton("자동 마스크로 되돌리기", (_, _) => _canvas.ResetToBaseline());
+        var undoButton = Theme.SecondaryButton("실행 취소 (Ctrl+Z)", (_, _) => _canvas.Undo());
+        undoButton.Margin = new Padding(0, 0, 6, 0);
+        toolbarLayout.Controls.Add(undoButton);
+
+        var resetButton = Theme.SecondaryButton("자동 마스크로 되돌리기", (_, _) => _canvas.ResetToBaseline());
         resetButton.Margin = new Padding(0, 0, 12, 0);
         toolbarLayout.Controls.Add(resetButton);
 
-        var canvasCard = BuildCardPanel(new Padding(12));
+        var canvasCard = Theme.Card(new Padding(1));
+        canvasCard.Margin = new Padding(0, 0, 0, 12);
         canvasCard.Dock = DockStyle.Fill;
         rootLayout.Controls.Add(canvasCard, 0, 1);
 
         _canvasHostPanel.Dock = DockStyle.Fill;
         _canvasHostPanel.AutoScroll = true;
-        _canvasHostPanel.BackColor = Color.FromArgb(238, 242, 255);
+        _canvasHostPanel.BackColor = Theme.PreviewBackground;
         _canvasHostPanel.Padding = new Padding(8);
         canvasCard.Controls.Add(_canvasHostPanel);
 
         _canvas.Location = new Point(8, 8);
         _canvasHostPanel.Controls.Add(_canvas);
 
-        var footer = BuildCardPanel(new Padding(16));
+        var footer = Theme.Card(new Padding(16, 12, 16, 12));
         footer.AutoSize = true;
         footer.Dock = DockStyle.Fill;
         rootLayout.Controls.Add(footer, 0, 2);
@@ -174,9 +197,9 @@ internal sealed class MaskEditorForm : Form
         footerLayout.Controls.Add(new Label
         {
             AutoSize = true,
-            Text = "왼쪽 마우스로 칠하면 바로 반영됩니다. Ctrl+마우스 휠로도 확대/축소할 수 있습니다.",
-            ForeColor = Color.FromArgb(71, 85, 105),
-            Font = new Font("Malgun Gothic", 9),
+            Text = "마우스 왼쪽 버튼으로 칠하면 바로 반영됩니다.  초록색 = 남길 부분  ·  Ctrl+휠 = 확대/축소  ·  Ctrl+Z = 실행 취소",
+            ForeColor = Theme.MutedText,
+            Font = Theme.SmallFont,
             Margin = new Padding(0, 8, 0, 0),
         }, 0, 0);
 
@@ -187,8 +210,10 @@ internal sealed class MaskEditorForm : Form
             FlowDirection = FlowDirection.LeftToRight,
         };
 
-        var cancelButton = CreateButton("취소", (_, _) => Close());
-        var applyButton = CreatePrimaryButton("적용", (_, _) => ApplyAndClose());
+        var cancelButton = Theme.SecondaryButton("취소", (_, _) => Close());
+        cancelButton.Margin = new Padding(0, 0, 8, 0);
+        var applyButton = Theme.PrimaryButton("편집 적용", (_, _) => ApplyAndClose());
+        applyButton.Margin = Padding.Empty;
         actionButtons.Controls.Add(cancelButton);
         actionButtons.Controls.Add(applyButton);
         footerLayout.Controls.Add(actionButtons, 1, 0);
@@ -291,35 +316,4 @@ internal sealed class MaskEditorForm : Form
         Close();
     }
 
-    private static Panel BuildCardPanel(Padding padding)
-    {
-        return new Panel
-        {
-            BackColor = Color.White,
-            Padding = padding,
-            Margin = new Padding(0, 0, 0, 12),
-        };
-    }
-
-    private static Button CreateButton(string text, EventHandler onClick)
-    {
-        var button = new Button
-        {
-            Text = text,
-            AutoSize = true,
-            Padding = new Padding(12, 8, 12, 8),
-        };
-        button.Click += onClick;
-        return button;
-    }
-
-    private static Button CreatePrimaryButton(string text, EventHandler onClick)
-    {
-        var button = CreateButton(text, onClick);
-        button.BackColor = Color.FromArgb(37, 99, 235);
-        button.ForeColor = Color.White;
-        button.FlatStyle = FlatStyle.Flat;
-        button.FlatAppearance.BorderSize = 0;
-        return button;
-    }
 }

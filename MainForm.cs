@@ -1,5 +1,6 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Nuggi.Models;
 using Nuggi.Services;
 
@@ -23,6 +24,7 @@ internal sealed class MainForm : Form
     private readonly HashSet<string> _selectedFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Bitmap> _sessionEditedMasks = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _maskGenerationLock = new(1, 1);
+    private readonly CancellationTokenSource _closingCts = new();
     private readonly string _sessionMaskOutputDirectory;
 
     private readonly ListBox _fileListBox = new();
@@ -36,6 +38,7 @@ internal sealed class MainForm : Form
     private readonly Label _statusLabel = new();
     private readonly Label _selectionSummaryLabel = new();
     private readonly Label _previewStatusLabel = new();
+    private readonly Label _fileListEmptyLabel = new();
     private readonly PictureBox _originalPictureBox = new();
     private readonly PictureBox _cutoutPictureBox = new();
     private readonly TextBox _logTextBox = new();
@@ -52,10 +55,11 @@ internal sealed class MainForm : Form
         _pythonBridge = new NuggiPythonBridge(_appPaths);
         _sessionMaskOutputDirectory = Path.Combine(Path.GetTempPath(), "Nuggi", "session-mask-output", Guid.NewGuid().ToString("N"));
 
-        Text = "Nuggi - WinForms";
+        Text = "Nuggi";
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(1240, 780);
-        ClientSize = new Size(1380, 900);
+        MinimumSize = new Size(1100, 720);
+        ClientSize = new Size(1380, 880);
+        Theme.ApplyToForm(this);
 
         BuildUi();
         HookEvents();
@@ -64,7 +68,7 @@ internal sealed class MainForm : Form
         _modelComboBox.SelectedIndex = 0;
         _trimCheckBox.Checked = true;
 
-        TryClearLegacyEditedMaskCache();
+        TryDeleteStaleTempFiles();
         Directory.CreateDirectory(_appPaths.PreviewCacheDirectory);
         Directory.CreateDirectory(_appPaths.MaskCacheDirectory);
         Directory.CreateDirectory(_sessionMaskOutputDirectory);
@@ -76,16 +80,19 @@ internal sealed class MainForm : Form
     protected override async void OnShown(EventArgs e)
     {
         base.OnShown(e);
-        _bodySplit.Panel1MinSize = 380;
-        _bodySplit.Panel2MinSize = 720;
-        SetSplitDistanceSafely(410);
+        _bodySplit.Panel1MinSize = 360;
+        _bodySplit.Panel2MinSize = 600;
+        SetSplitDistanceSafely(400);
 
         try
         {
             SetStatus("Python 배경 제거 엔진을 확인하는 중...");
-            await _pythonBridge.EnsureRuntimeReadyAsync();
+            await _pythonBridge.EnsureRuntimeReadyAsync(_closingCts.Token);
             SetStatus("이미지를 추가하면 오른쪽에 원본과 선택 영역이 표시됩니다.");
             AppendLog("Python 배경 제거 엔진을 확인했습니다.");
+        }
+        catch (OperationCanceledException) when (_closingCts.IsCancellationRequested)
+        {
         }
         catch (Exception ex)
         {
@@ -100,10 +107,19 @@ internal sealed class MainForm : Form
         }
     }
 
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        base.OnFormClosing(e);
+        if (!e.Cancel)
+        {
+            // Stops running Python workers so they do not outlive the window.
+            _closingCts.Cancel();
+        }
+    }
+
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         base.OnFormClosed(e);
-        _maskGenerationLock.Dispose();
         DisposeSessionEditedMasks();
         TryDeleteDirectory(_sessionMaskOutputDirectory);
         ReplacePreviewImage(_originalPictureBox, ref _originalImage, null);
@@ -112,45 +128,14 @@ internal sealed class MainForm : Form
 
     private void BuildUi()
     {
-        BackColor = Color.FromArgb(243, 244, 246);
-
-        var rootLayout = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 2,
-            Padding = new Padding(16),
-            BackColor = BackColor,
-        };
-        rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        rootLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        Controls.Add(rootLayout);
-
-        var headerPanel = BuildCardPanel(new Padding(18));
-        headerPanel.Height = 92;
-        headerPanel.Dock = DockStyle.Top;
-
-        headerPanel.Controls.Add(new Label
-        {
-            AutoSize = true,
-            Text = "Nuggi",
-            Font = new Font("Malgun Gothic", 20, FontStyle.Bold),
-            Location = new Point(18, 12),
-        });
-        headerPanel.Controls.Add(new Label
-        {
-            AutoSize = true,
-            Text = "C# WinForms에서 미리보기 확인, 영역 편집, 배경 제거 저장까지 한 번에 처리합니다.",
-            Font = new Font("Malgun Gothic", 10),
-            ForeColor = Color.FromArgb(100, 116, 139),
-            Location = new Point(20, 52),
-        });
-        rootLayout.Controls.Add(headerPanel, 0, 0);
+        Padding = new Padding(16);
 
         _bodySplit.Dock = DockStyle.Fill;
         _bodySplit.Orientation = Orientation.Vertical;
         _bodySplit.FixedPanel = FixedPanel.Panel1;
-        rootLayout.Controls.Add(_bodySplit, 0, 1);
+        _bodySplit.SplitterWidth = 16;
+        _bodySplit.BackColor = Theme.Background;
+        Controls.Add(_bodySplit);
 
         BuildLeftPanel(_bodySplit.Panel1);
         BuildRightPanel(_bodySplit.Panel2);
@@ -158,281 +143,275 @@ internal sealed class MainForm : Form
 
     private void BuildLeftPanel(Control parent)
     {
-        var leftCard = BuildCardPanel(new Padding(16));
-        leftCard.Dock = DockStyle.Fill;
-        parent.Controls.Add(leftCard);
+        var card = Theme.Card(new Padding(20));
+        card.Dock = DockStyle.Fill;
+        parent.Controls.Add(card);
 
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 11,
-            BackColor = leftCard.BackColor,
+            BackColor = Theme.Surface,
         };
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 170));
-        leftCard.Controls.Add(layout);
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        card.Controls.Add(layout);
 
-        layout.Controls.Add(new Label
+        void AddRow(Control control, SizeType sizeType = SizeType.AutoSize, float height = 0)
         {
-            AutoSize = true,
-            Text = "파일 목록",
-            Font = new Font("Malgun Gothic", 12, FontStyle.Bold),
-        }, 0, 0);
+            layout.RowStyles.Add(new RowStyle(sizeType, height));
+            layout.Controls.Add(control, 0, layout.RowStyles.Count - 1);
+        }
 
+        // Image list
+        var listHeader = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, Margin = new Padding(0, 0, 0, 8) };
+        listHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        listHeader.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        listHeader.Controls.Add(Theme.Title("이미지"), 0, 0);
         _selectionSummaryLabel.AutoSize = true;
-        _selectionSummaryLabel.Font = new Font("Malgun Gothic", 9);
-        _selectionSummaryLabel.ForeColor = Color.FromArgb(71, 85, 105);
-        layout.Controls.Add(_selectionSummaryLabel, 0, 1);
+        _selectionSummaryLabel.Font = Theme.SmallFont;
+        _selectionSummaryLabel.ForeColor = Theme.MutedText;
+        _selectionSummaryLabel.Anchor = AnchorStyles.Right;
+        listHeader.Controls.Add(_selectionSummaryLabel, 1, 0);
+        AddRow(listHeader);
 
         _fileListBox.Dock = DockStyle.Fill;
-        _fileListBox.HorizontalScrollbar = true;
         _fileListBox.IntegralHeight = false;
-        _fileListBox.Font = new Font("Consolas", 10);
-        layout.Controls.Add(_fileListBox, 0, 2);
+        _fileListBox.BorderStyle = BorderStyle.None;
+        _fileListBox.DrawMode = DrawMode.OwnerDrawFixed;
+        _fileListBox.ItemHeight = 44;
+        _fileListBox.DrawItem += DrawFileListItem;
 
-        var fileButtons = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            AutoSize = true,
-            WrapContents = true,
-            FlowDirection = FlowDirection.LeftToRight,
-            Margin = new Padding(0, 12, 0, 0),
-        };
-        fileButtons.Controls.Add(CreateButton("이미지 추가", (_, _) => AddFiles()));
-        fileButtons.Controls.Add(CreateButton("폴더 추가", (_, _) => AddFolder()));
-        fileButtons.Controls.Add(CreateButton("선택 제거", (_, _) => RemoveSelectedFiles()));
-        fileButtons.Controls.Add(CreateButton("전체 비우기", (_, _) => ClearFiles()));
-        layout.Controls.Add(fileButtons, 0, 3);
-        layout.Controls.Add(CreateFieldLabel("출력 폴더"), 0, 4);
+        _fileListEmptyLabel.Dock = DockStyle.Fill;
+        _fileListEmptyLabel.TextAlign = ContentAlignment.MiddleCenter;
+        _fileListEmptyLabel.ForeColor = Theme.MutedText;
+        _fileListEmptyLabel.BackColor = Theme.Surface;
+        _fileListEmptyLabel.Text = "아직 추가한 이미지가 없습니다.\n아래 [파일 추가] 또는 [폴더 추가]를 눌러 주세요.";
 
-        var outputPanel = new TableLayoutPanel
+        var listFrame = Theme.Card(new Padding(1));
+        listFrame.Dock = DockStyle.Fill;
+        listFrame.Margin = Padding.Empty;
+        listFrame.Controls.Add(_fileListBox);
+        listFrame.Controls.Add(_fileListEmptyLabel);
+        _fileListEmptyLabel.BringToFront();
+        AddRow(listFrame, SizeType.Percent, 100);
+
+        var fileButtons = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 4, RowCount = 1, Margin = new Padding(0, 8, 0, 0) };
+        fileButtons.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+        foreach (var (text, handler) in new (string, EventHandler)[]
+                 {
+                     ("파일 추가", (_, _) => AddFiles()),
+                     ("폴더 추가", (_, _) => AddFolder()),
+                     ("선택 제거", (_, _) => RemoveSelectedFiles()),
+                     ("비우기", (_, _) => ClearFiles()),
+                 })
         {
-            Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            AutoSize = true,
-            Margin = new Padding(0, 6, 0, 0),
-        };
+            fileButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
+            var button = Theme.SecondaryButton(text, handler);
+            button.AutoSize = false;
+            button.Padding = Padding.Empty;
+            button.Dock = DockStyle.Fill;
+            button.Margin = new Padding(fileButtons.Controls.Count == 0 ? 0 : 3, 0, fileButtons.Controls.Count == 3 ? 0 : 3, 0);
+            fileButtons.Controls.Add(button);
+        }
+
+        AddRow(fileButtons);
+
+        // Output settings
+        var settingsTitle = Theme.Title("저장 설정");
+        settingsTitle.Margin = new Padding(0, 20, 0, 0);
+        AddRow(settingsTitle);
+        AddRow(Theme.FieldLabel("저장 폴더"));
+
+        var outputPanel = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, Margin = Padding.Empty };
         outputPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         outputPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        _outputDirectoryTextBox.Dock = DockStyle.Fill;
+        _outputDirectoryTextBox.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        _outputDirectoryTextBox.Margin = new Padding(0, 0, 6, 0);
         outputPanel.Controls.Add(_outputDirectoryTextBox, 0, 0);
-        outputPanel.Controls.Add(CreateButton("찾아보기", (_, _) => ChooseOutputDirectory()), 1, 0);
-        layout.Controls.Add(outputPanel, 0, 5);
+        var browseButton = Theme.SecondaryButton("변경", (_, _) => ChooseOutputDirectory());
+        browseButton.Margin = Padding.Empty;
+        outputPanel.Controls.Add(browseButton, 1, 0);
+        AddRow(outputPanel);
 
-        layout.Controls.Add(CreateFieldLabel("모델"), 0, 6);
-
-        _modelComboBox.Dock = DockStyle.Top;
+        AddRow(Theme.FieldLabel("모델"));
+        _modelComboBox.Dock = DockStyle.Fill;
         _modelComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
-        _modelComboBox.Items.AddRange(["u2net (기본 / 자동 보정 포함)", "u2netp (가벼움 / 속도 우선)"]);
-        layout.Controls.Add(_modelComboBox, 0, 7);
+        _modelComboBox.Items.AddRange(["u2net · 기본 (자동 보정 포함)", "u2netp · 가벼움 (속도 우선)"]);
+        AddRow(_modelComboBox);
 
-        _trimCheckBox.Text = "피사체 기준으로 여백 자르기";
+        _trimCheckBox.Text = "피사체에 맞춰 빈 여백 잘라내기";
         _trimCheckBox.AutoSize = true;
         _trimCheckBox.Margin = new Padding(0, 12, 0, 0);
-        layout.Controls.Add(_trimCheckBox, 0, 8);
+        AddRow(_trimCheckBox);
 
-        var actionButtons = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            AutoSize = true,
-            WrapContents = false,
-            FlowDirection = FlowDirection.LeftToRight,
-            Margin = new Padding(0, 12, 0, 0),
-        };
-
-        ConfigurePrimaryButton(_startButton, "누끼 추출 시작");
+        // Actions
+        var actionButtons = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, Margin = new Padding(0, 20, 0, 0) };
+        actionButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
+        actionButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
+        Theme.StylePrimary(_startButton);
+        _startButton.Text = "누끼 추출 시작";
+        _startButton.Font = new Font(Theme.BaseFont, FontStyle.Bold);
+        _startButton.AutoSize = false;
+        _startButton.Height = 42;
+        _startButton.Dock = DockStyle.Fill;
+        _startButton.Margin = new Padding(0, 0, 4, 0);
+        Theme.StyleSecondary(_openOutputButton);
         _openOutputButton.Text = "결과 폴더 열기";
-        _openOutputButton.AutoSize = true;
-        _openOutputButton.Padding = new Padding(10, 8, 10, 8);
+        _openOutputButton.AutoSize = false;
+        _openOutputButton.Height = 42;
+        _openOutputButton.Dock = DockStyle.Fill;
+        _openOutputButton.Margin = new Padding(4, 0, 0, 0);
+        actionButtons.Controls.Add(_startButton, 0, 0);
+        actionButtons.Controls.Add(_openOutputButton, 1, 0);
+        AddRow(actionButtons);
 
-        actionButtons.Controls.Add(_startButton);
-        actionButtons.Controls.Add(_openOutputButton);
-        layout.Controls.Add(actionButtons, 0, 9);
-
-        var bottomPanel = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 3,
-            Margin = new Padding(0, 12, 0, 0),
-        };
-        bottomPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        bottomPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        bottomPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-
-        _progressBar.Dock = DockStyle.Top;
-        bottomPanel.Controls.Add(_progressBar, 0, 0);
+        _progressBar.Dock = DockStyle.Fill;
+        _progressBar.Height = 6;
+        _progressBar.Margin = new Padding(0, 14, 0, 0);
+        AddRow(_progressBar);
 
         _statusLabel.AutoSize = true;
         _statusLabel.Text = "준비됨";
-        _statusLabel.Font = new Font("Malgun Gothic", 9);
-        _statusLabel.ForeColor = Color.FromArgb(71, 85, 105);
-        _statusLabel.Margin = new Padding(0, 8, 0, 8);
-        bottomPanel.Controls.Add(_statusLabel, 0, 1);
+        _statusLabel.Font = Theme.SmallFont;
+        _statusLabel.ForeColor = Theme.MutedText;
+        _statusLabel.Margin = new Padding(0, 6, 0, 6);
+        AddRow(_statusLabel);
 
         _logTextBox.Dock = DockStyle.Fill;
         _logTextBox.Multiline = true;
         _logTextBox.ScrollBars = ScrollBars.Vertical;
         _logTextBox.ReadOnly = true;
-        _logTextBox.BackColor = Color.White;
-        _logTextBox.Font = new Font("Consolas", 9);
-        bottomPanel.Controls.Add(_logTextBox, 0, 2);
-        layout.Controls.Add(bottomPanel, 0, 10);
+        _logTextBox.BorderStyle = BorderStyle.None;
+        _logTextBox.BackColor = Theme.PreviewBackground;
+        _logTextBox.ForeColor = Theme.MutedText;
+        _logTextBox.Font = Theme.SmallFont;
+        AddRow(_logTextBox, SizeType.Absolute, 110);
     }
 
     private void BuildRightPanel(Control parent)
     {
-        var rightCard = BuildCardPanel(new Padding(16));
-        rightCard.Dock = DockStyle.Fill;
-        parent.Controls.Add(rightCard);
+        var card = Theme.Card(new Padding(20));
+        card.Dock = DockStyle.Fill;
+        parent.Controls.Add(card);
 
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
-            BackColor = rightCard.BackColor,
+            RowCount = 3,
+            BackColor = Theme.Surface,
         };
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        rightCard.Controls.Add(layout);
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        card.Controls.Add(layout);
 
-        layout.Controls.Add(new Label
-        {
-            AutoSize = true,
-            Text = "미리보기",
-            Font = new Font("Malgun Gothic", 12, FontStyle.Bold),
-        }, 0, 0);
+        var header = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, RowCount = 2, Margin = new Padding(0, 0, 0, 12) };
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        header.Controls.Add(Theme.Title("미리보기"), 0, 0);
 
         _previewStatusLabel.AutoSize = true;
-        _previewStatusLabel.Text = "파일을 선택하면 원본과 누끼 선택 영역이 표시됩니다.";
-        _previewStatusLabel.Font = new Font("Malgun Gothic", 9);
-        _previewStatusLabel.ForeColor = Color.FromArgb(71, 85, 105);
-        _previewStatusLabel.Margin = new Padding(0, 6, 0, 10);
-        layout.Controls.Add(_previewStatusLabel, 0, 1);
+        _previewStatusLabel.Font = Theme.SmallFont;
+        _previewStatusLabel.ForeColor = Theme.MutedText;
+        _previewStatusLabel.Text = "왼쪽 목록에서 이미지를 고르면 원본과 누끼 영역이 표시됩니다.";
+        header.Controls.Add(_previewStatusLabel, 0, 1);
 
-        var previewToolbar = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            AutoSize = true,
-            WrapContents = false,
-            FlowDirection = FlowDirection.LeftToRight,
-            Margin = new Padding(0, 0, 0, 12),
-        };
-        ConfigurePrimaryButton(_editMaskButton, "영역 편집");
-        previewToolbar.Controls.Add(_editMaskButton);
-        previewToolbar.Controls.Add(new Label
-        {
-            AutoSize = true,
-            Text = "초록색은 유지 영역이고, 편집 후 빨간색은 제거한 부분입니다.",
-            ForeColor = Color.FromArgb(71, 85, 105),
-            Margin = new Padding(8, 10, 0, 0),
-        });
-        layout.Controls.Add(previewToolbar, 0, 2);
+        Theme.StylePrimary(_editMaskButton);
+        _editMaskButton.Text = "영역 편집";
+        _editMaskButton.Anchor = AnchorStyles.Right;
+        _editMaskButton.Margin = Padding.Empty;
+        header.Controls.Add(_editMaskButton, 1, 0);
+        header.SetRowSpan(_editMaskButton, 2);
+        layout.Controls.Add(header, 0, 0);
 
-        var previewGrid = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            RowCount = 1,
-        };
+        var previewGrid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
         previewGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         previewGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        layout.Controls.Add(previewGrid, 0, 3);
+        previewGrid.Controls.Add(CreatePreviewPane("원본", _originalPictureBox, "선택한 이미지가 여기에 표시됩니다.", new Padding(0, 0, 6, 0)), 0, 0);
+        previewGrid.Controls.Add(CreatePreviewPane("누끼 영역", _cutoutPictureBox, "자동으로 찾은 피사체 영역이 여기에 표시됩니다.", new Padding(6, 0, 0, 0)), 1, 0);
+        layout.Controls.Add(previewGrid, 0, 1);
 
-        previewGrid.Controls.Add(CreatePreviewGroup("원본 이미지", _originalPictureBox), 0, 0);
-        previewGrid.Controls.Add(CreatePreviewGroup("선택 영역 표시", _cutoutPictureBox), 1, 0);
+        var legend = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true, Margin = new Padding(0, 10, 0, 0) };
+        legend.Controls.Add(CreateLegendItem(Theme.KeepArea, "유지되는 영역"));
+        legend.Controls.Add(CreateLegendItem(Theme.AddedArea, "직접 추가한 영역"));
+        legend.Controls.Add(CreateLegendItem(Theme.RemovedArea, "직접 지운 영역"));
+        layout.Controls.Add(legend, 0, 2);
+    }
+
+    private static Control CreatePreviewPane(string title, PictureBox pictureBox, string emptyText, Padding margin)
+    {
+        var pane = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = margin };
+        pane.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        pane.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        pane.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+        var caption = Theme.FieldLabel(title);
+        caption.Margin = new Padding(0, 0, 0, 6);
+        pane.Controls.Add(caption, 0, 0);
+
+        pictureBox.Dock = DockStyle.Fill;
+        pictureBox.SizeMode = PictureBoxSizeMode.Zoom;
+        pictureBox.BackColor = Theme.PreviewBackground;
+        pictureBox.Margin = Padding.Empty;
+        pictureBox.Padding = new Padding(8);
+        pictureBox.Paint += (_, e) =>
+        {
+            if (pictureBox.Image is null)
+            {
+                TextRenderer.DrawText(e.Graphics, emptyText, Theme.SmallFont, pictureBox.ClientRectangle, Theme.MutedText,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
+            }
+        };
+        pane.Controls.Add(pictureBox, 0, 1);
+        return pane;
+    }
+
+    private static Control CreateLegendItem(Color color, string text)
+    {
+        var item = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 18, 0) };
+        item.Controls.Add(new Label { AutoSize = true, Text = "●", ForeColor = color, Margin = new Padding(0, 0, 2, 0) });
+        var label = Theme.MutedLabel(text);
+        label.Margin = new Padding(0, 1, 0, 0);
+        item.Controls.Add(label);
+        return item;
+    }
+
+    private void DrawFileListItem(object? sender, DrawItemEventArgs e)
+    {
+        if (e.Index < 0 || e.Index >= _fileListBox.Items.Count)
+        {
+            return;
+        }
+
+        var path = (string)_fileListBox.Items[e.Index];
+        var selected = (e.State & DrawItemState.Selected) != 0;
+        using (var background = new SolidBrush(selected ? Theme.Selection : Theme.Surface))
+        {
+            e.Graphics.FillRectangle(background, e.Bounds);
+        }
+
+        var textLeft = e.Bounds.X + 12;
+        var textWidth = e.Bounds.Width - 24;
+        TextRenderer.DrawText(e.Graphics, Path.GetFileName(path), Theme.BaseFont,
+            new Rectangle(textLeft, e.Bounds.Y + 4, textWidth, 20), Theme.Text,
+            TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+        TextRenderer.DrawText(e.Graphics, Path.GetDirectoryName(path), Theme.SmallFont,
+            new Rectangle(textLeft, e.Bounds.Y + 23, textWidth, 18), Theme.MutedText,
+            TextFormatFlags.PathEllipsis | TextFormatFlags.NoPrefix);
+
+        using var divider = new Pen(Theme.Border);
+        e.Graphics.DrawLine(divider, e.Bounds.Left, e.Bounds.Bottom - 1, e.Bounds.Right, e.Bounds.Bottom - 1);
     }
 
     private void HookEvents()
     {
         _fileListBox.SelectedIndexChanged += async (_, _) => await LoadSelectedPreviewAsync();
-        _modelComboBox.SelectedIndexChanged += async (_, _) => await ReloadPreviewForCurrentSelectionAsync();
+        _modelComboBox.SelectedIndexChanged += async (_, _) => await LoadSelectedPreviewAsync();
         _startButton.Click += async (_, _) => await StartProcessingAsync();
         _openOutputButton.Click += (_, _) => OpenOutputDirectory();
         _editMaskButton.Click += async (_, _) => await EditCurrentMaskAsync();
-    }
-
-    private GroupBox CreatePreviewGroup(string title, PictureBox pictureBox)
-    {
-        var groupBox = new GroupBox
-        {
-            Text = title,
-            Dock = DockStyle.Fill,
-            Padding = new Padding(12),
-            Font = new Font("Malgun Gothic", 10, FontStyle.Bold),
-        };
-
-        var panel = new Panel
-        {
-            Dock = DockStyle.Fill,
-            BackColor = Color.FromArgb(238, 242, 255),
-            Padding = new Padding(8),
-        };
-
-        pictureBox.Dock = DockStyle.Fill;
-        pictureBox.SizeMode = PictureBoxSizeMode.Zoom;
-        pictureBox.BackColor = panel.BackColor;
-
-        panel.Controls.Add(pictureBox);
-        groupBox.Controls.Add(panel);
-        return groupBox;
-    }
-
-    private static Panel BuildCardPanel(Padding padding)
-    {
-        return new Panel
-        {
-            BackColor = Color.White,
-            Padding = padding,
-            Margin = new Padding(0, 0, 0, 12),
-        };
-    }
-
-    private static Label CreateFieldLabel(string text)
-    {
-        return new Label
-        {
-            AutoSize = true,
-            Text = text,
-            Font = new Font("Malgun Gothic", 9, FontStyle.Bold),
-            Margin = new Padding(0, 12, 0, 0),
-        };
-    }
-
-    private static Button CreateButton(string text, EventHandler onClick)
-    {
-        var button = new Button
-        {
-            Text = text,
-            AutoSize = true,
-            Padding = new Padding(10, 8, 10, 8),
-        };
-        button.Click += onClick;
-        return button;
-    }
-
-    private static void ConfigurePrimaryButton(Button button, string text)
-    {
-        button.Text = text;
-        button.AutoSize = true;
-        button.BackColor = Color.FromArgb(37, 99, 235);
-        button.ForeColor = Color.White;
-        button.FlatStyle = FlatStyle.Flat;
-        button.FlatAppearance.BorderSize = 0;
-        button.Padding = new Padding(12, 8, 12, 8);
     }
 
     private void SetSplitDistanceSafely(int preferredDistance)
@@ -563,7 +542,8 @@ internal sealed class MainForm : Form
 
     private void UpdateSelectionSummary()
     {
-        _selectionSummaryLabel.Text = $"준비한 파일: {_fileListBox.Items.Count}개";
+        _selectionSummaryLabel.Text = $"{_fileListBox.Items.Count}개";
+        _fileListEmptyLabel.Visible = _fileListBox.Items.Count == 0;
     }
 
     private void UpdateUiState()
@@ -598,11 +578,6 @@ internal sealed class MainForm : Form
         }
     }
 
-    private async Task ReloadPreviewForCurrentSelectionAsync()
-    {
-        await LoadSelectedPreviewAsync();
-    }
-
     private async Task LoadSelectedPreviewAsync()
     {
         if (_fileListBox.SelectedItem is not string selectedFile)
@@ -620,7 +595,13 @@ internal sealed class MainForm : Form
             SetPreviewStatus("원본 이미지를 불러오는 중...");
             ReplacePreviewImage(_cutoutPictureBox, ref _cutoutImage, null);
 
-            var originalPreview = await Task.Run(() => MaskPreviewRenderer.LoadPreviewBitmap(selectedFile, 1800));
+            var displayPath = await GetDisplayableSourcePathAsync(selectedFile);
+            if (requestId != _previewRequestId)
+            {
+                return;
+            }
+
+            var originalPreview = await Task.Run(() => MaskPreviewRenderer.LoadPreviewBitmap(displayPath, 1800));
             if (requestId != _previewRequestId)
             {
                 originalPreview.Dispose();
@@ -640,7 +621,7 @@ internal sealed class MainForm : Form
                 return;
             }
 
-            var selectionPreview = await Task.Run(() => BuildMainPreviewImage(selectedFile, modelName));
+            var selectionPreview = await Task.Run(() => BuildMainPreviewImage(selectedFile, displayPath, modelName));
             if (requestId != _previewRequestId)
             {
                 selectionPreview.Dispose();
@@ -652,6 +633,9 @@ internal sealed class MainForm : Form
                 ? "초록색은 현재 유지 영역이고, 빨간색은 이번 실행에서 직접 제거한 부분입니다."
                 : "초록색으로 보이는 영역이 현재 누끼로 유지될 부분입니다.");
         }
+        catch (OperationCanceledException) when (_closingCts.IsCancellationRequested)
+        {
+        }
         catch (Exception ex)
         {
             if (requestId != _previewRequestId)
@@ -660,21 +644,21 @@ internal sealed class MainForm : Form
             }
 
             ReplacePreviewImage(_cutoutPictureBox, ref _cutoutImage, null);
-            SetPreviewStatus("미리보기 생성 실패");
+            SetPreviewStatus("미리보기를 만들지 못했습니다. 왼쪽 아래 로그에서 원인을 확인해 주세요.");
             AppendLog($"미리보기 오류: {Path.GetFileName(selectedFile)} - {ex.Message}");
         }
         finally
         {
-            if (requestId == _previewRequestId)
+            if (requestId == _previewRequestId && !IsDisposed)
             {
                 UpdateUiState();
             }
         }
     }
 
-    private Image BuildMainPreviewImage(string inputFilePath, string modelName)
+    private Image BuildMainPreviewImage(string inputFilePath, string displayPath, string modelName)
     {
-        using var original = MaskPreviewRenderer.LoadSourceBitmap(inputFilePath);
+        using var original = MaskPreviewRenderer.LoadSourceBitmap(displayPath);
         using var currentMask = LoadEffectiveMaskBitmap(inputFilePath, modelName);
         Bitmap? baselineMask = null;
 
@@ -701,7 +685,7 @@ internal sealed class MainForm : Form
             return;
         }
 
-        await _maskGenerationLock.WaitAsync();
+        await _maskGenerationLock.WaitAsync(_closingCts.Token);
         try
         {
             if (File.Exists(autoMaskPath))
@@ -710,7 +694,7 @@ internal sealed class MainForm : Form
             }
 
             Directory.CreateDirectory(_appPaths.MaskCacheDirectory);
-            await _pythonBridge.GenerateMaskAsync(inputFilePath, modelName, autoMaskPath);
+            await _pythonBridge.GenerateMaskAsync(inputFilePath, modelName, autoMaskPath, _closingCts.Token);
         }
         finally
         {
@@ -738,7 +722,8 @@ internal sealed class MainForm : Form
             SetPreviewStatus("영역 편집용 마스크를 준비하는 중...");
             await EnsureMaskReadyAsync(selectedFile, modelName);
 
-            using var originalImage = await Task.Run(() => MaskPreviewRenderer.LoadSourceBitmap(selectedFile));
+            var displayPath = await GetDisplayableSourcePathAsync(selectedFile);
+            using var originalImage = await Task.Run(() => MaskPreviewRenderer.LoadSourceBitmap(displayPath));
             using var baselineMask = await Task.Run(() => MaskPreviewRenderer.LoadMaskBitmap(autoMaskPath));
             using var initialMask = GetEditedMaskClone(selectedFile, modelName) ?? (Bitmap)baselineMask.Clone();
 
@@ -761,6 +746,9 @@ internal sealed class MainForm : Form
             }
 
             await LoadSelectedPreviewAsync();
+        }
+        catch (OperationCanceledException) when (_closingCts.IsCancellationRequested)
+        {
         }
         catch (Exception ex)
         {
@@ -791,46 +779,75 @@ internal sealed class MainForm : Form
             return;
         }
 
-        Directory.CreateDirectory(outputDirectory);
-
         _isProcessing = true;
         _progressBar.Value = 0;
         UpdateUiState();
 
-        var successCount = 0;
         var modelName = SelectedModelName;
+        var successCount = 0;
+        var failureCount = 0;
+        var jobsFilePath = Path.Combine(_sessionMaskOutputDirectory, "batch-jobs.json");
 
         try
         {
-            for (var index = 0; index < files.Length; index++)
+            Directory.CreateDirectory(outputDirectory);
+
+            var reservedOutputPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var outputPaths = files.Select(file => BuildUniqueOutputPath(outputDirectory, file, reservedOutputPaths)).ToArray();
+            var jobs = files.Select((file, index) => new
             {
-                var filePath = files[index];
-                var outputPath = BuildUniqueOutputPath(outputDirectory, filePath);
+                input = file,
+                output = outputPaths[index],
+                mask = GetEffectiveMaskPathForProcessing(file, modelName),
+                trim = _trimCheckBox.Checked,
+            }).ToArray();
+            File.WriteAllText(jobsFilePath, JsonSerializer.Serialize(jobs), Encoding.UTF8);
 
-                SetStatus($"[{index + 1}/{files.Length}] {Path.GetFileName(filePath)} 처리 중...");
-                AppendLog($"처리 시작: {filePath}");
+            SetStatus($"[0/{files.Length}] 모델을 불러오는 중...");
+            AppendLog($"{files.Length}개 파일 처리 시작 (모델: {modelName})");
 
-                await EnsureMaskReadyAsync(filePath, modelName);
+            // Progress<T> posts each line to the UI thread in order, before the await below resumes.
+            IProgress<string> progress = new Progress<string>(line =>
+            {
+                var parts = line.Split('\t', 3);
+                if (parts.Length < 2 || !int.TryParse(parts[1], out var index) || index < 0 || index >= files.Length)
+                {
+                    return;
+                }
 
-                await _pythonBridge.RemoveBackgroundAsync(
-                    filePath,
-                    outputPath,
-                    modelName,
-                    _trimCheckBox.Checked,
-                    GetEffectiveMaskPathForProcessing(filePath, modelName));
+                if (parts[0] == "DONE")
+                {
+                    successCount++;
+                    AppendLog($"저장 완료: {outputPaths[index]}");
+                }
+                else if (parts[0] == "FAIL")
+                {
+                    failureCount++;
+                    AppendLog($"처리 실패: {files[index]} - {(parts.Length > 2 ? parts[2] : "알 수 없는 오류")}");
+                }
+                else
+                {
+                    return;
+                }
 
-                successCount++;
-                _progressBar.Value = (int)Math.Round((index + 1) * 100.0 / files.Length);
-                AppendLog($"저장 완료: {outputPath}");
-            }
+                var finished = successCount + failureCount;
+                _progressBar.Value = (int)Math.Round(finished * 100.0 / files.Length);
+                SetStatus($"[{finished}/{files.Length}] {Path.GetFileName(files[index])} 처리 완료");
+            });
 
-            SetStatus($"완료: {successCount}/{files.Length}개 성공");
+            await _pythonBridge.RunBatchAsync(jobsFilePath, modelName, progress.Report, _closingCts.Token);
+
+            SetStatus($"완료: 성공 {successCount}개, 실패 {failureCount}개");
             MessageBox.Show(
                 this,
-                $"누끼 추출이 완료되었습니다.\n\n성공: {successCount}/{files.Length}",
+                $"누끼 추출이 완료되었습니다.\n\n성공: {successCount}/{files.Length}" +
+                (failureCount > 0 ? $"\n실패: {failureCount}개 (로그 확인)" : string.Empty),
                 "Nuggi",
                 MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+                failureCount > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+        }
+        catch (OperationCanceledException) when (_closingCts.IsCancellationRequested)
+        {
         }
         catch (Exception ex)
         {
@@ -840,31 +857,42 @@ internal sealed class MainForm : Form
         }
         finally
         {
+            TryDeleteFile(jobsFilePath);
             _isProcessing = false;
-            UpdateUiState();
+            if (!IsDisposed)
+            {
+                UpdateUiState();
+            }
         }
     }
 
-    private string BuildUniqueOutputPath(string outputDirectory, string inputFilePath)
+    private static string BuildUniqueOutputPath(string outputDirectory, string inputFilePath, ISet<string> reservedPaths)
     {
         var stem = Path.GetFileNameWithoutExtension(inputFilePath);
         var candidate = Path.Combine(outputDirectory, $"{stem}_nuggi.png");
-        if (!File.Exists(candidate))
-        {
-            return candidate;
-        }
-
-        var counter = 1;
-        while (true)
+        for (var counter = 1; File.Exists(candidate) || !reservedPaths.Add(candidate); counter++)
         {
             candidate = Path.Combine(outputDirectory, $"{stem}_nuggi_{counter}.png");
-            if (!File.Exists(candidate))
-            {
-                return candidate;
-            }
-
-            counter++;
         }
+
+        return candidate;
+    }
+
+    // GDI+ cannot open WebP, so the UI previews a PNG copy converted by Python.
+    private async Task<string> GetDisplayableSourcePathAsync(string inputFilePath)
+    {
+        if (!string.Equals(Path.GetExtension(inputFilePath), ".webp", StringComparison.OrdinalIgnoreCase))
+        {
+            return inputFilePath;
+        }
+
+        var convertedPath = Path.Combine(_appPaths.PreviewCacheDirectory, "sources", $"{GetCacheKey(inputFilePath, "source")}.png");
+        if (!File.Exists(convertedPath))
+        {
+            await _pythonBridge.ConvertToPngAsync(inputFilePath, convertedPath, _closingCts.Token);
+        }
+
+        return convertedPath;
     }
 
     private void OpenOutputDirectory()
@@ -963,7 +991,7 @@ internal sealed class MainForm : Form
         _previewRequestId++;
         ReplacePreviewImage(_originalPictureBox, ref _originalImage, null);
         ReplacePreviewImage(_cutoutPictureBox, ref _cutoutImage, null);
-        SetPreviewStatus("파일을 선택하면 원본과 누끼 선택 영역이 표시됩니다.");
+        SetPreviewStatus("왼쪽 목록에서 이미지를 고르면 원본과 누끼 영역이 표시됩니다.");
         UpdateUiState();
     }
 
@@ -982,18 +1010,41 @@ internal sealed class MainForm : Form
         return $"{modelName}|{fileInfo.FullName}|{fileInfo.LastWriteTimeUtc.Ticks}";
     }
 
-    private void TryClearLegacyEditedMaskCache()
+    // Cache files are keyed by path and timestamp, so old ones are never reused; drop anything older than 30 days.
+    private void TryDeleteStaleTempFiles()
     {
+        var tempRoot = Path.GetDirectoryName(_appPaths.PreviewCacheDirectory)!;
+        if (!Directory.Exists(tempRoot))
+        {
+            return;
+        }
+
+        var cutoff = DateTime.UtcNow.AddDays(-30);
         try
         {
-            if (Directory.Exists(_appPaths.MaskEditCacheDirectory))
+            foreach (var file in Directory.EnumerateFiles(tempRoot, "*", SearchOption.AllDirectories))
             {
-                Directory.Delete(_appPaths.MaskEditCacheDirectory, recursive: true);
+                if (File.GetLastWriteTimeUtc(file) < cutoff)
+                {
+                    TryDeleteFile(file);
+                }
             }
         }
         catch (Exception ex)
         {
-            AppendLog($"이전 영역 편집 캐시 정리 실패: {ex.Message}");
+            AppendLog($"오래된 임시 파일 정리 실패: {ex.Message}");
+        }
+    }
+
+    private static void TryDeleteFile(string filePath)
+    {
+        try
+        {
+            File.Delete(filePath);
+        }
+        catch
+        {
+            // Best-effort temp cleanup.
         }
     }
 

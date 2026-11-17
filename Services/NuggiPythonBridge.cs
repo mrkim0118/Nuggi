@@ -48,41 +48,28 @@ internal sealed class NuggiPythonBridge
             cancellationToken);
     }
 
-    public Task RemoveBackgroundAsync(
-        string inputPath,
-        string outputPath,
-        string modelName,
-        bool trim,
-        string? maskPath = null,
-        CancellationToken cancellationToken = default)
+    public Task ConvertToPngAsync(string inputPath, string outputPath, CancellationToken cancellationToken = default)
     {
-        var arguments = new List<string>
-        {
-            _paths.WorkerScriptPath,
-            "remove",
-            "--input",
-            inputPath,
-            "--output",
-            outputPath,
-            "--model",
-            modelName,
-        };
-
-        if (!string.IsNullOrWhiteSpace(maskPath))
-        {
-            arguments.Add("--mask");
-            arguments.Add(maskPath);
-        }
-
-        if (trim)
-        {
-            arguments.Add("--trim");
-        }
-
-        return RunPythonAsync(arguments, cancellationToken);
+        return RunPythonAsync([_paths.WorkerScriptPath, "convert", "--input", inputPath, "--output", outputPath], cancellationToken);
     }
 
-    private async Task RunPythonAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken)
+    // Runs every job in one Python process so the model loads once. Each finished job reports "DONE	<i>" or "FAIL	<i>	<message>".
+    public Task RunBatchAsync(
+        string jobsFilePath,
+        string modelName,
+        Action<string> onOutputLine,
+        CancellationToken cancellationToken = default)
+    {
+        return RunPythonAsync(
+            [_paths.WorkerScriptPath, "batch", "--jobs", jobsFilePath, "--model", modelName],
+            cancellationToken,
+            onOutputLine);
+    }
+
+    private async Task RunPythonAsync(
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken,
+        Action<string>? onOutputLine = null)
     {
         using var process = new Process();
         process.StartInfo = new ProcessStartInfo
@@ -96,6 +83,8 @@ internal sealed class NuggiPythonBridge
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
         };
+
+        process.StartInfo.Environment["PYTHONIOENCODING"] = "utf-8";
 
         if (Directory.Exists(_paths.BundledModelDirectory))
         {
@@ -115,6 +104,7 @@ internal sealed class NuggiPythonBridge
             if (!string.IsNullOrWhiteSpace(eventArgs.Data))
             {
                 stdout.AppendLine(eventArgs.Data);
+                onOutputLine?.Invoke(eventArgs.Data);
             }
         };
 
@@ -133,7 +123,24 @@ internal sealed class NuggiPythonBridge
 
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
-        await process.WaitForExitAsync(cancellationToken);
+
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch (InvalidOperationException)
+            {
+                // Already exited.
+            }
+
+            throw;
+        }
 
         if (process.ExitCode != 0)
         {

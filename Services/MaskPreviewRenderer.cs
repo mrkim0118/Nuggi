@@ -43,44 +43,6 @@ internal static class MaskPreviewRenderer
         return bitmap;
     }
 
-    public static Bitmap BuildCutoutPreview(string imagePath, string maskPath, int maxDimension)
-    {
-        using var original = LoadSourceBitmap(imagePath);
-        using var mask = LoadMaskBitmap(maskPath);
-        return BuildCutoutPreview(original, mask, maxDimension);
-    }
-
-    public static Bitmap BuildCutoutPreview(Bitmap original, Bitmap mask, int maxDimension)
-    {
-        using var scaledOriginal = ResizeToMaxDimension(original, maxDimension);
-        using var scaledMask = ResizeBitmap(mask, scaledOriginal.Width, scaledOriginal.Height);
-        NormalizeMaskInPlace(scaledMask);
-
-        var checkerboard = CreateCheckerboard(scaledOriginal.Width, scaledOriginal.Height);
-        CompositeCutout(checkerboard, scaledOriginal, scaledMask);
-        DrawMaskOutline(checkerboard, scaledMask, Color.FromArgb(34, 197, 94));
-        return checkerboard;
-    }
-
-    public static Bitmap BuildMaskOverlayPreview(
-        string imagePath,
-        string currentMaskPath,
-        string? baselineMaskPath,
-        int maxDimension)
-    {
-        using var original = LoadSourceBitmap(imagePath);
-        using var currentMask = LoadMaskBitmap(currentMaskPath);
-        using var baselineMask = string.IsNullOrWhiteSpace(baselineMaskPath)
-            ? null
-            : LoadMaskBitmap(baselineMaskPath);
-
-        var scale = Math.Min(1.0, maxDimension / (double)Math.Max(original.Width, original.Height));
-        var width = Math.Max(1, (int)Math.Round(original.Width * scale));
-        var height = Math.Max(1, (int)Math.Round(original.Height * scale));
-
-        return BuildMaskOverlayPreview(original, currentMask, baselineMask, width, height);
-    }
-
     public static Bitmap BuildMaskOverlayPreview(
         Bitmap original,
         Bitmap currentMask,
@@ -124,21 +86,6 @@ internal static class MaskPreviewRenderer
         CompositeMaskOverlay(preview, scaledCurrentMask, scaledBaselineMask);
         DrawMaskOutline(preview, scaledCurrentMask, Color.FromArgb(16, 185, 129));
         return preview;
-    }
-
-    public static RectangleF GetImageRectangle(Rectangle bounds, Size imageSize)
-    {
-        if (imageSize.Width <= 0 || imageSize.Height <= 0 || bounds.Width <= 0 || bounds.Height <= 0)
-        {
-            return RectangleF.Empty;
-        }
-
-        var scale = Math.Min(bounds.Width / (float)imageSize.Width, bounds.Height / (float)imageSize.Height);
-        var width = imageSize.Width * scale;
-        var height = imageSize.Height * scale;
-        var x = bounds.X + (bounds.Width - width) / 2f;
-        var y = bounds.Y + (bounds.Height - height) / 2f;
-        return new RectangleF(x, y, width, height);
     }
 
     public static bool AreMasksEqual(Bitmap left, Bitmap right)
@@ -242,31 +189,6 @@ internal static class MaskPreviewRenderer
         graphics.SmoothingMode = SmoothingMode.HighQuality;
         graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
         graphics.DrawImage(source, 0, 0, width, height);
-        return bitmap;
-    }
-
-    private static Bitmap CreateCheckerboard(int width, int height)
-    {
-        var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
-        using var graphics = Graphics.FromImage(bitmap);
-        graphics.Clear(Color.FromArgb(236, 239, 244));
-
-        const int blockSize = 18;
-        using var brush = new SolidBrush(Color.FromArgb(213, 219, 230));
-
-        for (var top = 0; top < height; top += blockSize)
-        {
-            for (var left = 0; left < width; left += blockSize)
-            {
-                if (((left / blockSize) + (top / blockSize)) % 2 == 0)
-                {
-                    continue;
-                }
-
-                graphics.FillRectangle(brush, left, top, blockSize, blockSize);
-            }
-        }
-
         return bitmap;
     }
 
@@ -404,57 +326,6 @@ internal static class MaskPreviewRenderer
             0,
             255);
         destinationBuffer[index + 3] = 255;
-    }
-
-    private static void CompositeCutout(Bitmap destination, Bitmap original, Bitmap mask)
-    {
-        var rect = new Rectangle(0, 0, destination.Width, destination.Height);
-        var destData = destination.LockBits(rect, ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
-        var originalData = original.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-        var maskData = mask.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-
-        try
-        {
-            var destBuffer = new byte[Math.Abs(destData.Stride) * destination.Height];
-            var originalBuffer = new byte[Math.Abs(originalData.Stride) * original.Height];
-            var maskBuffer = new byte[Math.Abs(maskData.Stride) * mask.Height];
-
-            Marshal.Copy(destData.Scan0, destBuffer, 0, destBuffer.Length);
-            Marshal.Copy(originalData.Scan0, originalBuffer, 0, originalBuffer.Length);
-            Marshal.Copy(maskData.Scan0, maskBuffer, 0, maskBuffer.Length);
-
-            for (var index = 0; index < destBuffer.Length; index += 4)
-            {
-                var alpha = maskBuffer[index + 2] / 255f;
-                if (alpha <= 0f)
-                {
-                    continue;
-                }
-
-                var inverseAlpha = 1f - alpha;
-                destBuffer[index] = (byte)Math.Clamp(
-                    Math.Round(originalBuffer[index] * alpha + destBuffer[index] * inverseAlpha),
-                    0,
-                    255);
-                destBuffer[index + 1] = (byte)Math.Clamp(
-                    Math.Round(originalBuffer[index + 1] * alpha + destBuffer[index + 1] * inverseAlpha),
-                    0,
-                    255);
-                destBuffer[index + 2] = (byte)Math.Clamp(
-                    Math.Round(originalBuffer[index + 2] * alpha + destBuffer[index + 2] * inverseAlpha),
-                    0,
-                    255);
-                destBuffer[index + 3] = 255;
-            }
-
-            Marshal.Copy(destBuffer, 0, destData.Scan0, destBuffer.Length);
-        }
-        finally
-        {
-            destination.UnlockBits(destData);
-            original.UnlockBits(originalData);
-            mask.UnlockBits(maskData);
-        }
     }
 
     private static void ApplyExifOrientation(Image image)

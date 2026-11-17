@@ -10,7 +10,9 @@ internal sealed class MaskCanvasControl : Control
     private const int OverlayAlpha = 118;
     private const float MinimumZoom = 0.1f;
     private const float MaximumZoom = 16f;
+    private const int MaximumUndoSteps = 20; // Each step is a full mask copy, so keep memory bounded.
 
+    private readonly LinkedList<Bitmap> _undoStack = new();
     private Bitmap? _originalImage;
     private Bitmap? _maskImage;
     private Bitmap? _baselineMaskImage;
@@ -73,12 +75,52 @@ internal sealed class MaskCanvasControl : Control
             return;
         }
 
+        PushUndoSnapshot();
         using var graphics = Graphics.FromImage(_maskImage);
         graphics.CompositingMode = CompositingMode.SourceCopy;
         graphics.DrawImage(_baselineMaskImage, 0, 0, _maskImage.Width, _maskImage.Height);
 
         _displayMaskDirty = true;
         Invalidate();
+    }
+
+    public void Undo()
+    {
+        if (_undoStack.Last is not { } lastNode)
+        {
+            return;
+        }
+
+        _undoStack.RemoveLast();
+        _maskImage?.Dispose();
+        _maskImage = lastNode.Value;
+        _displayMaskDirty = true;
+        Invalidate();
+    }
+
+    private void PushUndoSnapshot()
+    {
+        if (_maskImage is null)
+        {
+            return;
+        }
+
+        _undoStack.AddLast((Bitmap)_maskImage.Clone());
+        if (_undoStack.Count > MaximumUndoSteps)
+        {
+            _undoStack.First!.Value.Dispose();
+            _undoStack.RemoveFirst();
+        }
+    }
+
+    private void ClearUndoStack()
+    {
+        foreach (var snapshot in _undoStack)
+        {
+            snapshot.Dispose();
+        }
+
+        _undoStack.Clear();
     }
 
     public Bitmap ExportMask()
@@ -182,6 +224,7 @@ internal sealed class MaskCanvasControl : Control
         }
 
         Focus();
+        PushUndoSnapshot();
         _isDrawing = true;
         _hoverImagePoint = imagePoint;
         _lastStrokeImagePoint = imagePoint;
@@ -503,6 +546,7 @@ internal sealed class MaskCanvasControl : Control
         _originalImage?.Dispose();
         _maskImage?.Dispose();
         _baselineMaskImage?.Dispose();
+        ClearUndoStack();
         InvalidateDisplayCache();
         _originalImage = null;
         _maskImage = null;

@@ -1,22 +1,11 @@
 from __future__ import annotations
 
+import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 from PIL import Image, ImageOps
-
-
-SUPPORTED_EXTENSIONS = {
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".bmp",
-    ".webp",
-    ".tif",
-    ".tiff",
-}
 
 
 class BackgroundRemovalError(Exception):
@@ -31,29 +20,6 @@ class MaskQualityMetrics:
     touches_all_edges: bool
     penalty: float
     should_retry: bool
-
-
-def collect_image_files(paths: Iterable[Path]) -> list[Path]:
-    files: list[Path] = []
-    for path in paths:
-        if not path.exists():
-            raise BackgroundRemovalError(f"Path not found: {path}")
-
-        if path.is_dir():
-            directory_files = sorted(
-                item
-                for item in path.rglob("*")
-                if item.is_file() and item.suffix.lower() in SUPPORTED_EXTENSIONS
-            )
-            files.extend(directory_files)
-            continue
-
-        if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
-            raise BackgroundRemovalError(f"Unsupported file type: {path.name}")
-
-        files.append(path)
-
-    return sorted(set(files))
 
 
 def trim_transparent_padding(image: Image.Image) -> Image.Image:
@@ -71,17 +37,15 @@ def trim_transparent_padding(image: Image.Image) -> Image.Image:
     return padded
 
 
-def build_output_path(input_path: Path, output_dir: Path) -> Path:
-    candidate = output_dir / f"{input_path.stem}_nuggi.png"
-    if not candidate.exists():
-        return candidate
+def model_home() -> Path:
+    # Same lookup rembg uses for its model files.
+    return Path(
+        os.path.expanduser(os.getenv("U2NET_HOME", os.path.join(os.getenv("XDG_DATA_HOME", "~"), ".u2net")))
+    )
 
-    counter = 1
-    while True:
-        candidate = output_dir / f"{input_path.stem}_nuggi_{counter}.png"
-        if not candidate.exists():
-            return candidate
-        counter += 1
+
+def is_model_downloaded(model_name: str) -> bool:
+    return (model_home() / f"{model_name}.onnx").is_file()
 
 
 class BackgroundRemover:
@@ -114,21 +78,6 @@ class BackgroundRemover:
         with Image.open(input_path) as source_image:
             return ImageOps.exif_transpose(source_image).convert("RGBA")
 
-    def remove_image(self, image: Image.Image) -> Image.Image:
-        try:
-            from rembg import remove
-        except ImportError as exc:  # pragma: no cover - dependency guard
-            raise BackgroundRemovalError(
-                "rembg is not installed. Install requirements.txt first."
-            ) from exc
-
-        result_image = remove(image, session=self._get_session())
-
-        if not isinstance(result_image, Image.Image):
-            raise BackgroundRemovalError("Background removal did not return an image result.")
-
-        return result_image.convert("RGBA")
-
     def generate_mask(self, image: Image.Image) -> Image.Image:
         try:
             from rembg import remove
@@ -144,9 +93,6 @@ class BackgroundRemover:
 
         best_candidate = primary_candidate
         for fallback_model_name in self._iter_fallback_models():
-            if fallback_model_name == self.model_name:
-                continue
-
             try:
                 fallback_candidate = self._generate_mask_candidate(remove, normalized_image, fallback_model_name)
             except BackgroundRemovalError:
@@ -160,35 +106,6 @@ class BackgroundRemover:
         return best_candidate[1]
 
     @staticmethod
-    def _build_checkerboard(size: tuple[int, int], block_size: int = 18) -> Image.Image:
-        width, height = size
-        board = Image.new("RGBA", size, (236, 239, 244, 255))
-        dark = (213, 219, 230, 255)
-
-        for top in range(0, height, block_size):
-            for left in range(0, width, block_size):
-                if ((left // block_size) + (top // block_size)) % 2 == 0:
-                    continue
-
-                tile = Image.new("RGBA", (block_size, block_size), dark)
-                board.paste(tile, (left, top))
-
-        return board
-
-    def build_cutout_preview(self, input_path: Path, max_size: int = 1600) -> tuple[Image.Image, Image.Image]:
-        original = self.load_image(input_path)
-
-        preview_original = original.copy()
-        preview_original.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
-
-        cutout = self.remove_image(preview_original)
-        checkerboard = self._build_checkerboard(cutout.size)
-        composed_preview = checkerboard.copy()
-        composed_preview.alpha_composite(cutout)
-
-        return preview_original, composed_preview.convert("RGBA")
-
-    @staticmethod
     def apply_mask(image: Image.Image, mask: Image.Image) -> Image.Image:
         normalized_image = image.convert("RGBA")
         normalized_mask = mask.convert("L").resize(normalized_image.size, Image.Resampling.LANCZOS)
@@ -196,24 +113,6 @@ class BackgroundRemover:
         result = normalized_image.copy()
         result.putalpha(normalized_mask)
         return result
-
-    def remove_background(
-        self,
-        input_path: Path,
-        output_dir: Path,
-        trim: bool = False,
-    ) -> Path:
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = build_output_path(input_path, output_dir)
-
-        normalized = self.load_image(input_path)
-        result_image = self.remove_image(normalized)
-
-        if trim:
-            result_image = trim_transparent_padding(result_image)
-
-        result_image.save(output_path, format="PNG")
-        return output_path
 
     def _generate_mask_candidate(self, remove_func, image: Image.Image, model_name: str) -> tuple[str, Image.Image, MaskQualityMetrics]:
         try:
@@ -233,13 +132,9 @@ class BackgroundRemover:
         return model_name, normalized_mask, self._evaluate_mask_quality(normalized_mask)
 
     def _iter_fallback_models(self) -> list[str]:
-        if self.model_name == "u2netp":
-            return ["u2net", "isnet-general-use", "birefnet-general-lite", "bria-rmbg"]
-
-        if self.model_name == "u2net":
-            return ["isnet-general-use", "birefnet-general-lite", "bria-rmbg", "u2netp"]
-
-        return ["u2net", "isnet-general-use", "birefnet-general-lite", "bria-rmbg"]
+        candidates = ["u2net", "isnet-general-use", "birefnet-general-lite", "bria-rmbg", "u2netp"]
+        # Only retry with models already on disk: a retry must never start a multi-hundred-MB download mid-batch.
+        return [name for name in candidates if name != self.model_name and is_model_downloaded(name)]
 
     @staticmethod
     def _evaluate_mask_quality(mask_image: Image.Image) -> MaskQualityMetrics:

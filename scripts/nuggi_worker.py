@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -10,38 +11,27 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from nuggi.background_remover import BackgroundRemovalError, BackgroundRemover, trim_transparent_padding
+from nuggi.background_remover import BackgroundRemover, trim_transparent_padding
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Nuggi worker")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    preview_parser = subparsers.add_parser("preview", help="Generate a cutout preview")
-    preview_parser.add_argument("--input", required=True)
-    preview_parser.add_argument("--output", required=True)
-    preview_parser.add_argument("--model", default="u2net")
-
     mask_parser = subparsers.add_parser("mask", help="Generate a foreground mask")
     mask_parser.add_argument("--input", required=True)
     mask_parser.add_argument("--output", required=True)
     mask_parser.add_argument("--model", default="u2net")
 
-    remove_parser = subparsers.add_parser("remove", help="Remove background and save PNG")
-    remove_parser.add_argument("--input", required=True)
-    remove_parser.add_argument("--output", required=True)
-    remove_parser.add_argument("--model", default="u2net")
-    remove_parser.add_argument("--mask")
-    remove_parser.add_argument("--trim", action="store_true")
+    convert_parser = subparsers.add_parser("convert", help="Save an image as PNG (for formats the UI cannot open)")
+    convert_parser.add_argument("--input", required=True)
+    convert_parser.add_argument("--output", required=True)
+
+    batch_parser = subparsers.add_parser("batch", help="Remove backgrounds for a JSON list of jobs in one process")
+    batch_parser.add_argument("--jobs", required=True)
+    batch_parser.add_argument("--model", default="u2net")
 
     return parser
-
-
-def save_preview(input_path: Path, output_path: Path, model_name: str) -> None:
-    remover = BackgroundRemover(model_name=model_name)
-    _, preview = remover.build_cutout_preview(input_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    preview.save(output_path, format="PNG")
 
 
 def save_mask(input_path: Path, output_path: Path, model_name: str) -> None:
@@ -53,30 +43,46 @@ def save_mask(input_path: Path, output_path: Path, model_name: str) -> None:
     mask_image.save(output_path, format="PNG")
 
 
-def save_removed_image(
-    input_path: Path,
-    output_path: Path,
-    model_name: str,
-    trim: bool,
-    mask_path: Path | None,
-) -> None:
-    remover = BackgroundRemover(model_name=model_name)
+def save_converted(input_path: Path, output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    BackgroundRemover.load_image(input_path).save(output_path, format="PNG")
+
+
+def run_job(remover: BackgroundRemover, job: dict) -> None:
+    input_path = Path(job["input"])
+    output_path = Path(job["output"])
+    mask_path = Path(job["mask"])
 
     normalized = remover.load_image(input_path)
 
-    if mask_path is not None:
+    if mask_path.is_file():
         with Image.open(mask_path) as source_mask:
             mask_image = source_mask.convert("L")
-
-        result_image = remover.apply_mask(normalized, mask_image)
     else:
-        result_image = remover.remove_image(normalized)
+        mask_image = remover.generate_mask(normalized)
+        mask_path.parent.mkdir(parents=True, exist_ok=True)
+        mask_image.save(mask_path, format="PNG")
 
-    if trim:
+    result_image = remover.apply_mask(normalized, mask_image)
+    if job.get("trim"):
         result_image = trim_transparent_padding(result_image)
 
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     result_image.save(output_path, format="PNG")
+
+
+def run_batch(jobs_path: Path, model_name: str) -> None:
+    jobs = json.loads(jobs_path.read_text(encoding="utf-8"))
+    # One remover for the whole batch, so each model is loaded once instead of once per image.
+    remover = BackgroundRemover(model_name=model_name)
+
+    for index, job in enumerate(jobs):
+        try:
+            run_job(remover, job)
+            print(f"DONE\t{index}", flush=True)
+        except Exception as exc:
+            message = str(exc).replace("\n", " ").replace("\t", " ") or type(exc).__name__
+            print(f"FAIL\t{index}\t{message}", flush=True)
 
 
 def main() -> int:
@@ -84,22 +90,12 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        input_path = Path(args.input).expanduser().resolve()
-        output_path = Path(args.output).expanduser().resolve()
-
-        if args.command == "preview":
-            save_preview(input_path, output_path, args.model)
-        elif args.command == "mask":
-            save_mask(input_path, output_path, args.model)
-        elif args.command == "remove":
-            mask_path = Path(args.mask).expanduser().resolve() if args.mask else None
-            save_removed_image(input_path, output_path, args.model, args.trim, mask_path)
-        else:  # pragma: no cover - defensive fallback
-            parser.error("Unknown command")
-            return 1
-    except BackgroundRemovalError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
+        if args.command == "mask":
+            save_mask(Path(args.input).resolve(), Path(args.output).resolve(), args.model)
+        elif args.command == "convert":
+            save_converted(Path(args.input).resolve(), Path(args.output).resolve())
+        elif args.command == "batch":
+            run_batch(Path(args.jobs).resolve(), args.model)
     except Exception as exc:  # pragma: no cover - process surface
         print(str(exc), file=sys.stderr)
         return 1

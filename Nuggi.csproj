@@ -7,8 +7,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Nuggi</RootNamespace>
     <AssemblyName>Nuggi</AssemblyName>
-    <Company>TechArchive</Company>
+    <Company>Manggdy</Company>
     <Authors>Manggdy</Authors>
+    <Copyright>Copyright © Manggdy</Copyright>
     <Product>Nuggi</Product>
     <Title>Nuggi</Title>
     <Description>Windows Forms background remover with live preview.</Description>

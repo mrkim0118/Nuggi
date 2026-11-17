@@ -75,13 +75,16 @@ Masks and preview copies are cached in `%TEMP%\Nuggi`. Files older than 30 days 
 
 Run `publish.bat` to create `publish/Nuggi-win-x64` and its zip archive.
 
-The distribution is framework-dependent to keep its size smaller. The target PC must have the Microsoft .NET 8 Desktop Runtime (x64) installed. Release packages do not include `.pdb` debug-symbol files.
+The package includes everything the background-removal engine needs: a portable Python runtime (`python/`) with all packages, and the downloaded models from `%USERPROFILE%\.u2net` (`.u2net/`). The target PC does not need Python.
+
+The app itself is framework-dependent to keep its size smaller, so the target PC must have the Microsoft .NET 8 Desktop Runtime (x64) installed. Unzip the package and run `Nuggi.exe` (or `Launch Nuggi.bat`). Release packages do not include `.pdb` debug-symbol files.
 
 ## Main files
 
 - `MainForm.cs`: main window (file list, settings, preview, batch run)
 - `MaskEditorForm.cs`, `Controls/MaskCanvasControl.cs`: mask editor
 - `Theme.cs`: shared colors, fonts, and control styles
+- `Assets/icon.ico`: app icon
 - `Services/NuggiPythonBridge.cs`: runs the Python worker
 - `scripts/nuggi_worker.py`: worker commands (`mask`, `convert`, `batch`)
 - `nuggi/background_remover.py`: mask generation and quality check

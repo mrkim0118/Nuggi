@@ -5,7 +5,11 @@ internal sealed class AppPaths
     public AppPaths(string rootDirectory)
     {
         RootDirectory = rootDirectory;
-        PythonExecutablePath = Path.Combine(rootDirectory, ".venv", "Scripts", "python.exe");
+        // Release packages ship a portable Python in "python"; development uses the .venv.
+        var bundledPython = Path.Combine(rootDirectory, "python", "python.exe");
+        PythonExecutablePath = File.Exists(bundledPython)
+            ? bundledPython
+            : Path.Combine(rootDirectory, ".venv", "Scripts", "python.exe");
         WorkerScriptPath = Path.Combine(rootDirectory, "scripts", "nuggi_worker.py");
         PreviewCacheDirectory = Path.Combine(Path.GetTempPath(), "Nuggi", "preview-cache");
         MaskCacheDirectory = Path.Combine(PreviewCacheDirectory, "masks");

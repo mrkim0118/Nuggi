@@ -6,6 +6,11 @@ set "PUBLISH_DIR=%CD%\publish\Nuggi-win-x64"
 set "ZIP_PATH=%CD%\publish\Nuggi-win-x64.zip"
 set "USER_MODEL_DIR=%USERPROFILE%\.u2net"
 
+if not exist ".venv\Scripts\python.exe" (
+    echo .venv was not found. Run run.bat once first.
+    goto :error
+)
+
 if exist "%PUBLISH_DIR%" (
     rmdir /s /q "%PUBLISH_DIR%"
 )
@@ -20,8 +25,13 @@ if errorlevel 1 goto :error
 
 if exist "%PUBLISH_DIR%\*.pdb" del /q "%PUBLISH_DIR%\*.pdb"
 
-echo [2/6] Copying Python virtual environment...
-robocopy ".venv" "%PUBLISH_DIR%\.venv" /E /XD "__pycache__" >nul
+echo [2/6] Copying portable Python runtime...
+rem A copied .venv only works where its base Python is installed, so ship the base Python itself plus the venv packages.
+for /f "usebackq delims=" %%P in (`.venv\Scripts\python.exe -c "import sys; print(sys.base_prefix)"`) do set "PYTHON_HOME=%%P"
+if not defined PYTHON_HOME goto :error
+robocopy "%PYTHON_HOME%" "%PUBLISH_DIR%\python" /E /XD "%PYTHON_HOME%\Lib\site-packages" "%PYTHON_HOME%\Lib\test" "%PYTHON_HOME%\Lib\idlelib" "%PYTHON_HOME%\Lib\tkinter" "%PYTHON_HOME%\tcl" "%PYTHON_HOME%\Doc" "%PYTHON_HOME%\include" "%PYTHON_HOME%\libs" "%PYTHON_HOME%\Tools" "%PYTHON_HOME%\Scripts" "__pycache__" >nul
+if errorlevel 8 goto :error
+robocopy ".venv\Lib\site-packages" "%PUBLISH_DIR%\python\Lib\site-packages" /E /XD "__pycache__" >nul
 if errorlevel 8 goto :error
 
 echo [3/6] Copying Python helper files...
@@ -34,7 +44,7 @@ copy /Y "README.md" "%PUBLISH_DIR%\README.md" >nul
 
 echo [4/6] Copying bundled model cache when available...
 if exist "%USER_MODEL_DIR%" (
-    robocopy "%USER_MODEL_DIR%" "%PUBLISH_DIR%\.u2net" /E >nul
+    robocopy "%USER_MODEL_DIR%" "%PUBLISH_DIR%\.u2net" *.onnx >nul
     if errorlevel 8 goto :error
 )
 

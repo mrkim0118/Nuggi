@@ -27,8 +27,12 @@ internal static class Theme
     public static readonly Font LabelFont = new(FontFamily, 9f, FontStyle.Bold);
     public static readonly Font TitleFont = new(FontFamily, 12f, FontStyle.Bold);
 
+    // The exe embeds Assets\icon.ico (ApplicationIcon), so every window reuses it.
+    private static readonly Icon? AppIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+
     public static void ApplyToForm(Form form)
     {
+        form.Icon = AppIcon;
         form.BackColor = Background;
         form.ForeColor = Text;
         form.Font = BaseFont;

@@ -85,6 +85,8 @@ internal sealed class NuggiPythonBridge
         };
 
         process.StartInfo.Environment["PYTHONIOENCODING"] = "utf-8";
+        // Ignore packages the user installed in their own Python profile; use only the shipped ones.
+        process.StartInfo.Environment["PYTHONNOUSERSITE"] = "1";
 
         if (Directory.Exists(_paths.BundledModelDirectory))
         {

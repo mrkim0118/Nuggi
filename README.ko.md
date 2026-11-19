@@ -16,7 +16,7 @@
 
 [Releases](https://github.com/mrkim0118/Nuggi/releases/latest)에서 최신 버전을 받습니다.
 
-- **`Nuggi-Setup-<버전>.exe`** (추천): 설치 프로그램. 관리자 권한 없이 현재 사용자에게 설치되고, 시작 메뉴 바로가기(바탕화면 바로가기는 선택)를 만듭니다. Windows 설정 > 앱에서 제거할 수 있습니다.
+- **`Nuggi-Setup-<버전>.exe`** (추천): 설치 프로그램. 설치 폴더를 직접 고를 수 있습니다. 기본은 관리자 권한 없이 현재 사용자에게 설치되고, 모든 사용자용(Program Files, 관리자 권한 필요)으로도 설치할 수 있습니다. 시작 메뉴 바로가기(바탕화면 바로가기는 선택)를 만들고, Windows 설정 > 앱에서 제거할 수 있습니다.
 - **`Nuggi-win-x64.zip`**: 포터블 버전. 압축을 풀고 `Nuggi.exe`를 실행합니다.
 
 둘 다 Python과 모델이 들어 있습니다. .NET 8 Desktop Runtime (x64)이 필요하며, 없으면 설치 프로그램이 다운로드 페이지를 열어 줍니다.
@@ -77,8 +77,8 @@
 
 | 데이터 | 위치 |
 |---|---|
-| 설치된 앱(설치 프로그램 사용 시) | `%LOCALAPPDATA%\Programs\Nuggi` |
-| 저장 결과(기본 저장 폴더) | `Nuggi.exe` 옆의 `output` (앱을 제거해도 남음) |
+| 설치된 앱(설치 프로그램 사용 시) | 설치할 때 고른 폴더. 기본값: `%LOCALAPPDATA%\Programs\Nuggi`(현재 사용자) 또는 `%ProgramFiles%\Nuggi`(모든 사용자) |
+| 저장 결과(기본 저장 폴더) | `Nuggi.exe` 옆의 `output`. 그 폴더에 쓸 수 없으면(예: Program Files) `사진\Nuggi`. 앱을 제거해도 남음 |
 | 마스크·미리보기 캐시 | `%TEMP%\Nuggi` (30일이 지난 파일은 앱 시작 시 삭제) |
 | 분할 모델 | `%USERPROFILE%\.u2net` |
 

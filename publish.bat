@@ -71,7 +71,10 @@ if not defined ISCC (
     goto :done
 )
 for /f "usebackq delims=" %%V in (`dotnet msbuild Nuggi.csproj -getProperty:Version`) do set "APP_VERSION=%%V"
-"%ISCC%" /Q /DAppVersion=%APP_VERSION% "installer\Nuggi.iss"
+rem The installer refuses install folders too long for the deepest package file (Windows 260-character path limit).
+for /f "usebackq delims=" %%L in (`powershell -NoProfile -Command "$d = '%PUBLISH_DIR%'; (Get-ChildItem -LiteralPath $d -Recurse -File | ForEach-Object { $_.FullName.Length - $d.Length - 1 } | Measure-Object -Maximum).Maximum"`) do set "MAX_REL_PATH=%%L"
+if not defined MAX_REL_PATH goto :error
+"%ISCC%" /Q /DAppVersion=%APP_VERSION% /DMaxRelPath=%MAX_REL_PATH% "installer\Nuggi.iss"
 if errorlevel 1 goto :error
 echo Installer: %CD%\publish\Nuggi-Setup-%APP_VERSION%.exe
 

@@ -13,10 +13,10 @@
     <Product>Nuggi</Product>
     <Title>Nuggi</Title>
     <Description>Windows Forms background remover with live preview.</Description>
-    <Version>1.3.2</Version>
+    <Version>1.3.3</Version>
     <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
-    <AssemblyVersion>1.3.2.0</AssemblyVersion>
-    <FileVersion>1.3.2.0</FileVersion>
+    <AssemblyVersion>1.3.3.0</AssemblyVersion>
+    <FileVersion>1.3.3.0</FileVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">

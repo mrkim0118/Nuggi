@@ -65,7 +65,7 @@ internal sealed class MainForm : Form
         BuildUi();
         HookEvents();
 
-        _outputDirectoryTextBox.Text = Path.Combine(_appPaths.RootDirectory, "output");
+        _outputDirectoryTextBox.Text = GetDefaultOutputDirectory(_appPaths.RootDirectory);
         _modelComboBox.SelectedIndex = 0;
         _trimCheckBox.Checked = true;
 
@@ -970,12 +970,30 @@ internal sealed class MainForm : Form
         return convertedPath;
     }
 
+    // Results go next to the app, unless the app folder is read-only (an all-users install in Program Files).
+    private static string GetDefaultOutputDirectory(string rootDirectory)
+    {
+        var besideApp = Path.Combine(rootDirectory, "output");
+        try
+        {
+            Directory.CreateDirectory(besideApp);
+            var probe = Path.Combine(besideApp, $".write-test-{Guid.NewGuid():N}");
+            File.WriteAllText(probe, string.Empty);
+            File.Delete(probe);
+            return besideApp;
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Nuggi");
+        }
+    }
+
     private void OpenOutputDirectory()
     {
         var outputDirectory = _outputDirectoryTextBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(outputDirectory))
         {
-            outputDirectory = Path.Combine(_appPaths.RootDirectory, "output");
+            outputDirectory = GetDefaultOutputDirectory(_appPaths.RootDirectory);
             _outputDirectoryTextBox.Text = outputDirectory;
         }
 

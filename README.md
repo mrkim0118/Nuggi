@@ -16,7 +16,7 @@ Add images, check the detected subject in a live preview, fix the area by hand i
 
 Get the latest version from [Releases](https://github.com/mrkim0118/Nuggi/releases/latest).
 
-- **`Nuggi-Setup-<version>.exe`** (recommended): installer. Installs for the current user without admin rights, adds a Start menu shortcut (desktop shortcut optional), and can be removed from Windows Settings > Apps.
+- **`Nuggi-Setup-<version>.exe`** (recommended): installer. You choose the install folder. By default it installs for the current user without admin rights; it can also install for all users (Program Files, needs admin rights). It adds a Start menu shortcut (desktop shortcut optional) and can be removed from Windows Settings > Apps.
 - **`Nuggi-win-x64.zip`**: portable version. Unzip and run `Nuggi.exe`.
 
 Both include Python and the models. The .NET 8 Desktop Runtime (x64) is required; the installer opens its download page if it is missing.
@@ -77,8 +77,8 @@ The automatic mask retry only uses fallback models that are already downloaded (
 
 | Data | Location |
 |---|---|
-| Installed app (installer) | `%LOCALAPPDATA%\Programs\Nuggi` |
-| Saved results (default save folder) | `output` next to `Nuggi.exe` (kept when uninstalling) |
+| Installed app (installer) | The folder chosen in setup. Default: `%LOCALAPPDATA%\Programs\Nuggi` (current user) or `%ProgramFiles%\Nuggi` (all users) |
+| Saved results (default save folder) | `output` next to `Nuggi.exe`; if that folder is read-only (for example Program Files), `Pictures\Nuggi`. Kept when uninstalling |
 | Mask and preview cache | `%TEMP%\Nuggi` (files older than 30 days are deleted at startup) |
 | Segmentation models | `%USERPROFILE%\.u2net` |
 

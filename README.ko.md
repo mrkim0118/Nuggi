@@ -12,6 +12,15 @@
 
 이미지를 추가하고, 실시간 미리보기로 인식된 피사체를 확인하고, 필요하면 영역을 직접 고친 뒤 투명 PNG로 한 번에 저장합니다.
 
+## 다운로드
+
+[Releases](https://github.com/mrkim0118/Nuggi/releases/latest)에서 최신 버전을 받습니다.
+
+- **`Nuggi-Setup-<버전>.exe`** (추천): 설치 프로그램. 관리자 권한 없이 현재 사용자에게 설치되고, 시작 메뉴 바로가기(바탕화면 바로가기는 선택)를 만듭니다. Windows 설정 > 앱에서 제거할 수 있습니다.
+- **`Nuggi-win-x64.zip`**: 포터블 버전. 압축을 풀고 `Nuggi.exe`를 실행합니다.
+
+둘 다 Python과 모델이 들어 있습니다. .NET 8 Desktop Runtime (x64)이 필요하며, 없으면 설치 프로그램이 다운로드 페이지를 열어 줍니다.
+
 ## 주요 기능
 
 - **파일·폴더 추가**: 이미지 파일을 하나씩 추가하거나, 폴더 안의 지원 이미지를 하위 폴더까지 한꺼번에 추가합니다.
@@ -50,6 +59,8 @@
 
 처음 배경 제거를 실행하면 분할 모델을 자동으로 내려받습니다(`u2net` 약 170 MB). 객체 클릭은 처음 쓸 때 Segment Anything을 내려받습니다(약 113 MB). 배포 패키지에는 둘 다 들어 있습니다.
 
+설치 후 처음 실행할 때는 엔진이 코드를 준비하느라 최대 1분 정도 걸립니다("Python 배경 제거 엔진을 확인하는 중..."). 다음부터는 더 빨리 시작됩니다.
+
 자동 마스크 재시도는 이미 내려받은 대체 모델(`.u2net` 또는 `%USERPROFILE%\.u2net`)만 사용하므로, 일괄 처리 도중 큰 다운로드가 시작되지 않습니다.
 
 ### 지원 형식
@@ -66,6 +77,8 @@
 
 | 데이터 | 위치 |
 |---|---|
+| 설치된 앱(설치 프로그램 사용 시) | `%LOCALAPPDATA%\Programs\Nuggi` |
+| 저장 결과(기본 저장 폴더) | `Nuggi.exe` 옆의 `output` (앱을 제거해도 남음) |
 | 마스크·미리보기 캐시 | `%TEMP%\Nuggi` (30일이 지난 파일은 앱 시작 시 삭제) |
 | 분할 모델 | `%USERPROFILE%\.u2net` |
 
@@ -94,7 +107,7 @@
 .\publish.bat
 ```
 
-`publish/Nuggi-win-x64`와 zip 압축 파일이 만들어집니다.
+`publish/Nuggi-win-x64`, zip 압축 파일, 설치 프로그램 `publish/Nuggi-Setup-<버전>.exe`가 만들어집니다. 설치 프로그램 단계에는 [Inno Setup 6](https://jrsoftware.org/isdl.php)이 필요하며, 없으면 이 단계는 건너뜁니다. 설치 스크립트는 `installer/Nuggi.iss`입니다.
 
 패키지에는 배경 제거 엔진에 필요한 모든 것이 들어 있습니다: 모든 패키지가 설치된 포터블 Python 런타임(`python/`)과 `%USERPROFILE%\.u2net`에서 가져온 모델(`.u2net/`).
 
@@ -112,6 +125,7 @@
 | `nuggi/background_remover.py` | 마스크 생성과 품질 검사 |
 | `tests/test_worker.py` | Python 테스트 |
 | `Assets/` | 앱 아이콘(`icon.ico`)과 README용 아이콘(`icon.png`) |
+| `installer/Nuggi.iss` | 설치 프로그램 스크립트 (Inno Setup 6) |
 | `run.bat`, `publish.bat` | 실행·배포 스크립트 |
 
 ## 사용한 라이브러리

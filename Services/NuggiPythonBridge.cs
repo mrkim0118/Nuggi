@@ -106,6 +106,9 @@ internal sealed class NuggiPythonBridge
         process.StartInfo.Environment["PYTHONIOENCODING"] = "utf-8";
         // Ignore packages the user installed in their own Python profile; use only the shipped ones.
         process.StartInfo.Environment["PYTHONNOUSERSITE"] = "1";
+        // numba (used by rembg) caches compiled code next to its package by default; in a deep or read-only
+        // install folder that path is too long or not writable and the import fails. Keep it in a short temp path.
+        process.StartInfo.Environment["NUMBA_CACHE_DIR"] = Path.Combine(_paths.PreviewCacheDirectory, "numba-cache");
 
         if (Directory.Exists(_paths.BundledModelDirectory))
         {

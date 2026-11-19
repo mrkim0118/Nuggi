@@ -12,6 +12,15 @@
 
 Add images, check the detected subject in a live preview, fix the area by hand if needed, and save transparent PNG files in one batch.
 
+## Download
+
+Get the latest version from [Releases](https://github.com/mrkim0118/Nuggi/releases/latest).
+
+- **`Nuggi-Setup-<version>.exe`** (recommended): installer. Installs for the current user without admin rights, adds a Start menu shortcut (desktop shortcut optional), and can be removed from Windows Settings > Apps.
+- **`Nuggi-win-x64.zip`**: portable version. Unzip and run `Nuggi.exe`.
+
+Both include Python and the models. The .NET 8 Desktop Runtime (x64) is required; the installer opens its download page if it is missing.
+
 ## Features
 
 - **Add files or folders**: Add image files one by one, or every supported image in a folder (subfolders included).
@@ -50,6 +59,8 @@ Hand-edited masks are kept until the app closes.
 
 The first background-removal run downloads the segmentation model automatically (about 170 MB for `u2net`). Object click downloads Segment Anything on first use (about 113 MB). Release packages already include both.
 
+The first start after installing takes up to about a minute while the engine prepares its code ("Python 배경 제거 엔진을 확인하는 중..."); later starts are faster.
+
 The automatic mask retry only uses fallback models that are already downloaded (in `.u2net` or `%USERPROFILE%\.u2net`), so it never starts a large download in the middle of a batch.
 
 ### Supported formats
@@ -66,6 +77,8 @@ The automatic mask retry only uses fallback models that are already downloaded (
 
 | Data | Location |
 |---|---|
+| Installed app (installer) | `%LOCALAPPDATA%\Programs\Nuggi` |
+| Saved results (default save folder) | `output` next to `Nuggi.exe` (kept when uninstalling) |
 | Mask and preview cache | `%TEMP%\Nuggi` (files older than 30 days are deleted at startup) |
 | Segmentation models | `%USERPROFILE%\.u2net` |
 
@@ -94,7 +107,7 @@ If the app reports that Python could not be found, the `.venv` folder points to 
 .\publish.bat
 ```
 
-This creates `publish/Nuggi-win-x64` and its zip archive.
+This creates `publish/Nuggi-win-x64`, its zip archive, and the installer `publish/Nuggi-Setup-<version>.exe`. The installer step needs [Inno Setup 6](https://jrsoftware.org/isdl.php) and is skipped if it is not installed; the script is `installer/Nuggi.iss`.
 
 The package includes everything the background-removal engine needs: a portable Python runtime (`python/`) with all packages, and the downloaded models from `%USERPROFILE%\.u2net` (`.u2net/`).
 
@@ -112,6 +125,7 @@ The app itself is framework-dependent to keep its size smaller, so the target PC
 | `nuggi/background_remover.py` | Mask generation and quality check |
 | `tests/test_worker.py` | Python tests |
 | `Assets/` | App icon (`icon.ico`) and README icon (`icon.png`) |
+| `installer/Nuggi.iss` | Installer script (Inno Setup 6) |
 | `run.bat`, `publish.bat` | Run and release scripts |
 
 ## Libraries

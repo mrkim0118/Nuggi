@@ -19,13 +19,13 @@ if exist "%ZIP_PATH%" (
     del /q "%ZIP_PATH%"
 )
 
-echo [1/6] Publishing WinForms app...
+echo [1/7] Publishing WinForms app...
 dotnet publish Nuggi.csproj -c Release -r win-x64 --self-contained false -o "%PUBLISH_DIR%" -v minimal -p:DebugType=None -p:DebugSymbols=false
 if errorlevel 1 goto :error
 
 if exist "%PUBLISH_DIR%\*.pdb" del /q "%PUBLISH_DIR%\*.pdb"
 
-echo [2/6] Copying portable Python runtime...
+echo [2/7] Copying portable Python runtime...
 rem A copied .venv only works where its base Python is installed, so ship the base Python itself plus the venv packages.
 for /f "usebackq delims=" %%P in (`.venv\Scripts\python.exe -c "import sys; print(sys.base_prefix)"`) do set "PYTHON_HOME=%%P"
 if not defined PYTHON_HOME goto :error
@@ -34,7 +34,7 @@ if errorlevel 8 goto :error
 robocopy ".venv\Lib\site-packages" "%PUBLISH_DIR%\python\Lib\site-packages" /E /XD "__pycache__" >nul
 if errorlevel 8 goto :error
 
-echo [3/6] Copying Python helper files...
+echo [3/7] Copying Python helper files...
 robocopy "scripts" "%PUBLISH_DIR%\scripts" /E /XD "__pycache__" >nul
 if errorlevel 8 goto :error
 robocopy "nuggi" "%PUBLISH_DIR%\nuggi" /E /XD "__pycache__" >nul
@@ -43,13 +43,13 @@ copy /Y "requirements.txt" "%PUBLISH_DIR%\requirements.txt" >nul
 copy /Y "README.md" "%PUBLISH_DIR%\README.md" >nul
 copy /Y "README.ko.md" "%PUBLISH_DIR%\README.ko.md" >nul
 
-echo [4/6] Copying bundled model cache when available...
+echo [4/7] Copying bundled model cache when available...
 if exist "%USER_MODEL_DIR%" (
     robocopy "%USER_MODEL_DIR%" "%PUBLISH_DIR%\.u2net" *.onnx >nul
     if errorlevel 8 goto :error
 )
 
-echo [5/6] Creating launcher...
+echo [5/7] Creating launcher...
 (
     echo @echo off
     echo setlocal
@@ -57,10 +57,25 @@ echo [5/6] Creating launcher...
     echo start "" ".\Nuggi.exe"
 ) > "%PUBLISH_DIR%\Launch Nuggi.bat"
 
-echo [6/6] Creating zip archive...
+echo [6/7] Creating zip archive...
 tar.exe -a -cf "%ZIP_PATH%" -C "%PUBLISH_DIR%" .
 if errorlevel 1 goto :error
 
+echo [7/7] Creating installer...
+set "ISCC="
+for %%I in ("%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" "%ProgramFiles%\Inno Setup 6\ISCC.exe") do (
+    if not defined ISCC if exist "%%~I" set "ISCC=%%~I"
+)
+if not defined ISCC (
+    echo Inno Setup 6 was not found, so the installer was skipped. Install it from https://jrsoftware.org/isdl.php
+    goto :done
+)
+for /f "usebackq delims=" %%V in (`dotnet msbuild Nuggi.csproj -getProperty:Version`) do set "APP_VERSION=%%V"
+"%ISCC%" /Q /DAppVersion=%APP_VERSION% "installer\Nuggi.iss"
+if errorlevel 1 goto :error
+echo Installer: %CD%\publish\Nuggi-Setup-%APP_VERSION%.exe
+
+:done
 echo Publish complete.
 echo Folder: %PUBLISH_DIR%
 echo Zip: %ZIP_PATH%

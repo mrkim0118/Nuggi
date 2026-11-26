@@ -32,6 +32,7 @@ Both include Python and the models. The .NET 8 Desktop Runtime (x64) is required
 - **Trim**: Optionally trim empty transparent margins around the subject.
 - **Automatic retry**: When the first mask covers almost the whole image or almost nothing, Nuggi retries with another already-downloaded model.
 - **Clean exit**: Closing the window stops any running background work.
+- **Update check**: On launch, checks the latest GitHub release and asks whether to download and install the new version.
 
 ## Requirements
 
@@ -127,6 +128,7 @@ The app itself is framework-dependent to keep its size smaller, so the target PC
 | `Assets/` | App icon (`icon.ico`) and README icon (`icon.png`) |
 | `installer/Nuggi.iss` | Installer script (Inno Setup 6) |
 | `run.bat`, `publish.bat` | Run and release scripts |
+| `GitHubUpdater.cs` | GitHub release update check |
 
 ## Libraries
 

@@ -84,6 +84,7 @@ internal sealed class MainForm : Form
         _bodySplit.Panel1MinSize = 360;
         _bodySplit.Panel2MinSize = 600;
         SetSplitDistanceSafely(400);
+        CheckForUpdateOnStartup();
 
         try
         {
@@ -105,6 +106,39 @@ internal sealed class MainForm : Form
                 "Nuggi",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
+        }
+    }
+
+    // Asks once per launch when GitHub has a newer release, then runs its setup and closes.
+    private async void CheckForUpdateOnStartup()
+    {
+        var release = await GitHubUpdater.FindNewerReleaseAsync();
+        if (release is null || IsDisposed)
+        {
+            return;
+        }
+
+        var message = $"새 버전 v{release.Version}을 사용할 수 있습니다.\n현재 버전: {GitHubUpdater.CurrentVersion}\n\n지금 다운로드하고 설치할까요?";
+        if (MessageBox.Show(this, message, "업데이트 확인", MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes)
+        {
+            return;
+        }
+
+        var originalTitle = Text;
+        UseWaitCursor = true;
+        try
+        {
+            await GitHubUpdater.DownloadAndStartSetupAsync(release, new Progress<int>(percent => Text = $"업데이트 다운로드 중... {percent}%"));
+            Close();
+        }
+        catch (Exception ex)
+        {
+            Text = originalTitle;
+            MessageBox.Show(this, $"업데이트 다운로드에 실패했습니다.\n{ex.Message}", "업데이트 확인", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            UseWaitCursor = false;
         }
     }
 
